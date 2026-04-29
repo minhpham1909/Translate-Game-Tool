@@ -2,6 +2,7 @@ import { getDatabase } from '../store/database'
 import { AIService } from '../api/aiService'
 import { TranslationBlock, AppSettings } from '../../shared/types'
 import { getSettings } from '../store/settings'
+import { validateTranslation } from '../utils/qaLinter'
 
 // Hàm tiện ích: Tạm dừng execution (dùng cho Exponential Backoff)
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms))
@@ -62,7 +63,7 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
 
     // 3. Chuẩn bị Statement
     const stmtCheckTM = db.prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
-    const stmtUpdateBlock = db.prepare(`UPDATE translation_blocks SET translated_text = ?, translated_by = ?, status = 'draft' WHERE id = ?`)
+    const stmtUpdateBlock = db.prepare(`UPDATE translation_blocks SET translated_text = ?, translated_by = ?, status = ? WHERE id = ?`)
     const stmtUpdateTMUsage = db.prepare(`UPDATE translation_memory SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE original_text = ?`)
     
     // Giai đoạn 1: Lọc qua TM để tiết kiệm API
@@ -72,8 +73,11 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
         const tmRecord = stmtCheckTM.get(block.original_text) as { translated_text: string } | undefined
         
         if (tmRecord) {
-          // TM hit! Auto-fill ngay lập tức
-          stmtUpdateBlock.run(tmRecord.translated_text, 'tm', block.id)
+          // TM hit! Kéo qua linter kiểm tra lại cho chắc
+          const errors = validateTranslation(block.original_text, tmRecord.translated_text)
+          const status = errors.length > 0 ? 'warning' : 'draft'
+          
+          stmtUpdateBlock.run(tmRecord.translated_text, 'tm', status, block.id)
           stmtUpdateTMUsage.run(block.original_text)
           totalSuccess++
         } else {
@@ -112,7 +116,15 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
               const translated = translatedTexts[i]
               const block = blockMapping[i]
               
-              stmtUpdateBlock.run(translated, settings.activeProvider, block.id)
+              // Chạy qua Linter để bắt lỗi mất Tag/Biến
+              const errors = validateTranslation(block.original_text, translated)
+              const status = errors.length > 0 ? 'warning' : 'draft'
+              
+              if (errors.length > 0) {
+                console.log(`[Linter] Cảnh báo tại block ${block.id}:`, errors)
+              }
+              
+              stmtUpdateBlock.run(translated, settings.activeProvider, status, block.id)
               stmtInsertTM.run(block.original_text, translated)
               totalSuccess++
             }

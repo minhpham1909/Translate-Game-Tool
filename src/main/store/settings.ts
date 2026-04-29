@@ -1,5 +1,5 @@
 import Store from 'electron-store'
-import { AppSettings } from '../../shared/types'
+import { AppSettings, ProjectConfig } from '../../shared/types'
 
 const defaultSettings: AppSettings = {
   // Group 1
@@ -30,9 +30,10 @@ const defaultSettings: AppSettings = {
 
 // Khởi tạo electron-store. Data sẽ được lưu dưới dạng file JSON 
 // trong thư mục AppData của hệ điều hành.
-const store = new Store<{ settings: AppSettings }>({
+const store = new Store<{ settings: AppSettings, project: ProjectConfig | null }>({
   defaults: {
-    settings: defaultSettings
+    settings: defaultSettings,
+    project: null
   }
 })
 
@@ -56,4 +57,18 @@ export function updateApiKey(provider: import('../../shared/types').AIProvider, 
   const current = getSettings()
   const apiKeys = { ...current.apiKeys, [provider]: key }
   store.set('settings', { ...current, apiKeys })
+}
+
+/**
+ * Lấy cấu hình Project hiện tại
+ */
+export function getProjectConfig(): ProjectConfig | null {
+  return store.get('project')
+}
+
+/**
+ * Lưu cấu hình Project mới (Setup)
+ */
+export function saveProjectConfig(project: ProjectConfig): void {
+  store.set('project', project)
 }

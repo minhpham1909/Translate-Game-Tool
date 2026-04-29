@@ -39,6 +39,12 @@ export interface TranslationMemoryRecord {
   last_used_at?: string;
 }
 
+export interface ProjectConfig {
+  gameFolderPath: string; // Đường dẫn tuyệt đối đến thư mục game/
+  sourceLanguage: string; // Ngôn ngữ nguồn (ví dụ: 'english')
+  targetLanguage: string; // Ngôn ngữ đích (ví dụ: 'vietnamese')
+}
+
 // Định nghĩa các AI Provider được hỗ trợ chính thức
 export type AIProvider = 'gemini' | 'claude' | 'gpt' | 'deepseek' | 'grok';
 

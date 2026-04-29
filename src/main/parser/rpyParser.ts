@@ -85,67 +85,57 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
     }
 
     if (state === ParserState.IN_DIALOGUE_BLOCK) {
-      // Tìm dòng comment chứa Original Text
-      const commentMatch = line.match(commentRegex)
-      if (commentMatch) {
-        currentCharacterId = commentMatch[2] || null
-        currentOriginalText = commentMatch[3]
+      // Cross-Translation: Bỏ qua dòng comment (Tiếng gốc/Nhật)
+      if (line.trim().startsWith('#')) {
         continue
       }
 
-      // Tìm dòng translatable (bản dịch)
-      if (currentOriginalText) {
-        const lineMatch = line.match(dialogueLineRegex)
-        // Loại bỏ các dòng comment bị nhận diện nhầm
-        if (lineMatch && !line.trim().startsWith('#')) {
-          const transText = lineMatch[3]
-          // Dịch rồi thì approved, chưa dịch (empty string) thì empty
-          const isTranslated = transText.length > 0 && transText !== currentOriginalText
-          
-          blocks.push({
-            block_hash: currentBlockHash,
-            block_type: 'dialogue',
-            character_id: currentCharacterId,
-            original_text: currentOriginalText,
-            translated_text: transText || null,
-            status: isTranslated ? 'approved' : 'empty',
-            indentation: lineMatch[1], // Capture exact indent (CRITICAL)
-            line_index: i // Lưu vị trí dòng để ghi file sau này
-          })
-          
-          // Reset cho block tiếp theo
-          currentOriginalText = ''
-          state = ParserState.OUTSIDE
-        }
+      // Tìm dòng active (Tiếng Anh)
+      const lineMatch = line.match(dialogueLineRegex)
+      if (lineMatch) {
+        const charId = lineMatch[2] || null
+        const activeText = lineMatch[3]
+        
+        blocks.push({
+          block_hash: currentBlockHash,
+          block_type: 'dialogue',
+          character_id: charId,
+          original_text: activeText, // Đây là bản Tiếng Anh (Source for AI)
+          translated_text: null,     // AI sẽ dịch sau
+          status: 'empty',
+          indentation: lineMatch[1], // Capture exact indent (CRITICAL)
+          line_index: i // Lưu vị trí dòng để ghi đè đúng dòng active
+        })
+        
+        // Reset cho block tiếp theo
+        state = ParserState.OUTSIDE
       }
     }
 
     if (state === ParserState.IN_STRING_BLOCK) {
+      if (line.trim().startsWith('#')) continue
+
+      // Bỏ qua dòng 'old' (Tiếng Nhật làm key)
       const oldMatch = line.match(oldStringRegex)
       if (oldMatch) {
-        currentOriginalText = oldMatch[2]
         continue
       }
 
-      if (currentOriginalText) {
-        const newMatch = line.match(newStringRegex)
-        if (newMatch) {
-          const transText = newMatch[2]
-          const isTranslated = transText.length > 0 && transText !== currentOriginalText
-          
-          blocks.push({
-            block_hash: `string_line_${i}`, // Tạo hash dựa vào dòng
-            block_type: 'string',
-            character_id: null,
-            original_text: currentOriginalText,
-            translated_text: transText || null,
-            status: isTranslated ? 'approved' : 'empty',
-            indentation: newMatch[1], // Capture exact indent (CRITICAL)
-            line_index: i
-          })
-          
-          currentOriginalText = ''
-        }
+      // Trích xuất dòng 'new' (Tiếng Anh)
+      const newMatch = line.match(newStringRegex)
+      if (newMatch) {
+        const activeText = newMatch[2]
+        
+        blocks.push({
+          block_hash: `string_line_${i}`, // Tạo hash dựa vào dòng
+          block_type: 'string',
+          character_id: null,
+          original_text: activeText, // Tiếng Anh (Source for AI)
+          translated_text: null,
+          status: 'empty',
+          indentation: newMatch[1], // Capture exact indent (CRITICAL)
+          line_index: i
+        })
       }
     }
   }

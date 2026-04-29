@@ -38,3 +38,20 @@
 
 ### Known Issues / Blockers
 - Không có lỗi nào hiện tại. UI vẫn đang thiếu.
+
+## [2026-04-29] Session: Phase 3 - Project Setup & Cross-Translation
+### Completed
+- [x] Nâng cấp `types.ts` và `settings.ts` để hỗ trợ `ProjectConfig` (Quản lý dự án Cross-Translation).
+- [x] Tạo `projectIpc.ts` xử lý quét danh sách ngôn ngữ (`scanAvailableLanguages`).
+- [x] Nâng cấp `rpyParser.ts`: Triển khai cơ chế Dịch Bắc Cầu (bỏ qua dòng gốc Tiếng Nhật, trích xuất dòng Tiếng Anh).
+- [x] Tạo `qaLinter.ts`: So khớp số lượng tag `[]` và `{}` để chống mất biến (Hallucination). Tích hợp vào Background Queue.
+- [x] Tạo `exportService.ts`: Đắp bản dịch ngược lại file `.rpy` bằng Hash Map, tự động fallback nếu bị `warning`, bảo tồn `old` string cho giao diện, và tạo file `.backup`.
+
+### Current State
+- Backend Core hoàn thiện 100%: Project Setup -> Parser (Cross-Translation) -> TM/API Queue -> Linter -> Exporter (Backup/Restore).
+
+### Next Steps
+- Triển khai Phase 4: Xây dựng IPC Bridge (API Contract) và bắt tay vào làm giao diện React (Frontend).
+
+### Known Issues / Blockers
+- UI chưa bắt đầu. Cần làm UI Setup Wizard để kích hoạt luồng.

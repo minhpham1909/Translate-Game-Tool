@@ -1,0 +1,57 @@
+Create a modern, high-density desktop application UI for a Computer-Assisted Translation (CAT) Tool used for localizing Visual Novel games. The design should look like a native Electron app. Use Tailwind CSS, shadcn/ui components, and Lucide react icons. Default to a sleek Dark Mode (zinc/slate color palette) to reduce eye strain for translators.
+
+The layout must have a strict 3-pane structure: Left Sidebar, Main Workspace, and a Collapsible Bottom Terminal.
+
+1. LEFT SIDEBAR (File Explorer & Progress):
+- Width: ~300px.
+- A "New Project" button at the top.
+- A search input to filter files.
+- A Tree View list of files (e.g., "script.rpy", "options.rpy", "screens.rpy").
+- Each file item in the list must show the filename, a tiny status icon, and a mini progress bar below the name (e.g., 75% translated).
+- The active file should have a distinct highlighted background.
+
+2. TOP HEADER (Action Bar):
+- Breadcrumbs showing the current active file (e.g., "Project / tl / english / script.rpy").
+- Global Action Buttons aligned to the right: "Pre-flight Analytics", "Global Search (Ctrl+F)", "Settings (Gear icon)", and a primary prominent "Export Project" button.
+
+3. MAIN WORKSPACE (Translation Editor):
+- This is the core area. It contains a virtualized, scrollable list of "Translation Block" cards.
+- Above the list, a filter bar: Tabs for "All", "Empty", "Draft (AI)", "Approved", "Warnings".
+- EACH TRANSLATION CARD must be a highly functional row containing:
+  - Header of the card: Show Character Name as a Badge (e.g., "Eileen"), the Block Hash ID (e.g., "#start_123" in monospace muted text), and the line number.
+  - Body of the card (Dual-pane layout): 
+    - Left column: The Original Text (read-only, slightly muted text).
+    - Right column: A Textarea for the Translated Text.
+  - Footer/Actions of the card: 
+    - A Status Badge: "Empty" (gray), "Draft" (blue/yellow), "Approved" (green), "Warning" (red - e.g., missing format tags).
+    - Action buttons (icon only): "AI Translate", "Revert", "Approve (Checkmark)".
+
+4. BOTTOM BAR (System Log & Status):
+- A thin footer acting as a status bar.
+- Shows total project progress (e.g., "Total: 15,000 / 100,000 lines").
+- Shows estimated API Cost: "$1.25 used".
+- A toggle button to expand a "Terminal/Console" panel that shows real-time system logs (e.g., "[INFO] Parsing complete...", "[WARNING] Rate limit hit, waiting...").
+
+Make the UI look professional, compact (data-dense, not too much whitespace), and optimized for desktop screens (1080p).
+
+Now, create an overlay Modal for the "Global Settings" of this translation tool. 
+It should be a large, centered modal with a left-aligned vertical tab menu.
+
+The vertical tabs are: "AI & API", "Prompt & Logic", "Translation Memory", and "System".
+
+1. "AI & API" Tab Content:
+- A Select dropdown for "Active Provider" (Gemini, OpenAI, Claude, Local Custom).
+- Password inputs for the API Keys.
+- A "Test Connection" button.
+- A slider for "Temperature" (0.0 to 1.0) with a warning note: "Keep below 0.3 for format stability".
+
+2. "Prompt & Logic" Tab Content:
+- Input for "Target Language" (e.g., Vietnamese).
+- A large Textarea for "Custom System Prompt" (Contextual rules).
+- Number inputs for "Batch Size" (default: 20) and "Concurrent Requests".
+
+3. "Translation Memory" Tab Content:
+- A toggle switch for "Enable Auto-fill from TM".
+- A slider for "Fuzzy Match Threshold" (90% to 100%).
+
+Ensure the modal has a sticky footer with "Cancel" and "Save Changes" buttons. Use standard form control layouts (labels on top or left, clear helper text below inputs).

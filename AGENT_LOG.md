@@ -49,4 +49,17 @@
 - [BE] `src/main/store/settings.ts` — Áp dụng `defaultSettings` chuẩn xác theo document. Dùng `electron-store` để lưu trữ, không dùng SQLite.
 - [BE] `src/main/api/aiService.ts` — Viết lại `getSystemPrompt` thành kiến trúc **Hybrid Prompt**: Tách Part A (Hardcoded rules) và Part B (Văn phong từ `userCustomPrompt` + TỪ ĐIỂN). Đồng thời pass object `settings` xuống cho các Translator (như Gemini) để truyền `targetLanguage`, `temperature`, và `customEndpoint` một cách linh động.
 **Status:** ✅ Complete
-**Notes:** Chức năng đổi ngôn ngữ đích (targetLanguage) và base URL tùy chỉnh (customEndpoint) đã hoàn toàn khả dụng ở lớp Backend. Đợi có UI là hoạt động trơn tru.
+**Notes:** Avatar upload not included — not part of the request. Flagged as future suggestion.
+
+## [2026-04-29 19:45] Phase 3 - Cross-Translation & Utilities
+**Requested:** Thực thi Phase 3: Auto-QA Linter, Safe Export và Cập nhật Parser hỗ trợ Cross-Translation (Dịch bắc cầu).
+**Delivered:**
+- [BE] `src/shared/types.ts` — Thêm `ProjectConfig` interface.
+- [BE] `src/main/store/settings.ts` — Thêm các hàm `getProjectConfig()`, `saveProjectConfig()`.
+- [BE] `src/main/api/projectIpc.ts` — Thêm hàm `scanAvailableLanguages()` và `setupProject()`.
+- [BE] `src/main/parser/rpyParser.ts` — Đổi Regex/State Machine để bỏ qua dòng gốc và trích xuất dòng Active (Tiếng Anh) làm original_text.
+- [BE] `src/main/utils/qaLinter.ts` — Thêm hàm `validateTranslation()` đếm ngoặc vuông/nhọn.
+- [BE] `src/main/services/translationEngine.ts` — Gọi Linter sau khi API/TM trả về kết quả, tự động gán `warning` nếu lỗi.
+- [BE] `src/main/services/exportService.ts` — Thêm hàm `exportFile()` với logic fallback an toàn và giữ nguyên key `old` strings; thêm hàm `restoreBackup()`.
+**Status:** ✅ Complete
+**Notes:** Chấp nhận thiết kế Cross-Translation của user. Các block bị lỗi Linter sẽ tự động fallback về tiếng Anh thay vì xuất tiếng Việt để chống crash game.
