@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { initDatabase, closeDatabase } from './store/database'
 
 function createWindow(): void {
   // Create the browser window.
@@ -52,6 +53,13 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
 
+  try {
+    initDatabase()
+    console.log('[System] Database initialized successfully')
+  } catch (err) {
+    console.error('[System] Failed to initialize database:', err)
+  }
+
   createWindow()
 
   app.on('activate', function () {
@@ -68,6 +76,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('will-quit', () => {
+  closeDatabase()
+  console.log('[System] Database connection closed')
 })
 
 // In this file you can include the rest of your app's specific main process
