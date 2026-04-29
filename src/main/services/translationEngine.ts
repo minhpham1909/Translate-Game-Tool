@@ -1,5 +1,5 @@
 import { getDatabase } from '../store/database'
-import { translateBatchWithGemini } from '../api/aiService'
+import { AIService } from '../api/aiService'
 import { TranslationBlock, AppSettings } from '../../shared/types'
 import { getSettings } from '../store/settings'
 
@@ -53,9 +53,16 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
     const textsToTranslate: string[] = []
     const blockMapping: { [index: number]: TranslationBlock } = {}
 
-    // 2. Chuẩn bị Statement cho Translation Memory
+    // 2. Tải toàn bộ Từ Điển (Glossary) từ DB
+    const glossaries = db.prepare(`SELECT source_text, target_text FROM glossaries`).all() as {source_text: string, target_text: string}[]
+    let glossaryText = ""
+    if (glossaries.length > 0) {
+      glossaryText = glossaries.map(g => `${g.source_text} = ${g.target_text}`).join('\n')
+    }
+
+    // 3. Chuẩn bị Statement
     const stmtCheckTM = db.prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
-    const stmtUpdateBlock = db.prepare(`UPDATE translation_blocks SET translated_text = ?, status = 'draft' WHERE id = ?`)
+    const stmtUpdateBlock = db.prepare(`UPDATE translation_blocks SET translated_text = ?, translated_by = ?, status = 'draft' WHERE id = ?`)
     const stmtUpdateTMUsage = db.prepare(`UPDATE translation_memory SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE original_text = ?`)
     
     // Giai đoạn 1: Lọc qua TM để tiết kiệm API
@@ -66,7 +73,7 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
         
         if (tmRecord) {
           // TM hit! Auto-fill ngay lập tức
-          stmtUpdateBlock.run(tmRecord.translated_text, block.id)
+          stmtUpdateBlock.run(tmRecord.translated_text, 'tm', block.id)
           stmtUpdateTMUsage.run(block.original_text)
           totalSuccess++
         } else {
@@ -86,12 +93,8 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
         try {
           console.log(`[Queue] Bắt đầu gọi API cho ${textsToTranslate.length} dòng...`)
           
-          let translatedTexts: string[] = []
-          if (settings.activeProvider === 'gemini') {
-            translatedTexts = await translateBatchWithGemini(textsToTranslate)
-          } else {
-            throw new Error(`Provider ${settings.activeProvider} chưa được hỗ trợ.`)
-          }
+          // Truyền từ điển đã parse vào
+          const translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText)
           
           if (translatedTexts.length !== textsToTranslate.length) {
              throw new Error(`Độ dài mảng output JSON (${translatedTexts.length}) không khớp với input (${textsToTranslate.length})`)
@@ -109,7 +112,7 @@ export async function startBackgroundQueue(onProgress?: (progress: { success: nu
               const translated = translatedTexts[i]
               const block = blockMapping[i]
               
-              stmtUpdateBlock.run(translated, block.id)
+              stmtUpdateBlock.run(translated, settings.activeProvider, block.id)
               stmtInsertTM.run(block.original_text, translated)
               totalSuccess++
             }

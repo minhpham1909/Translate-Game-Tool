@@ -2,11 +2,30 @@ import Store from 'electron-store'
 import { AppSettings } from '../../shared/types'
 
 const defaultSettings: AppSettings = {
+  // Group 1
   apiKeys: {},
   activeProvider: 'gemini',
   activeModelId: 'gemini-1.5-flash',
+  customEndpoint: '',
+
+  // Group 2
+  targetLanguage: 'Tiếng Việt',
+  temperature: 0.2,
+  userCustomPrompt: '',
+
+  // Group 3
   batchSize: 20,
-  targetLanguage: 'Vietnamese'
+  concurrentRequests: 1,
+  costWarningThreshold: 2.0,
+
+  // Group 4
+  enableTranslationMemory: true,
+  tmFuzzyThreshold: 1.0,
+
+  // Group 5
+  theme: 'system',
+  editorFontSize: 14,
+  autoSaveInterval: 5
 }
 
 // Khởi tạo electron-store. Data sẽ được lưu dưới dạng file JSON 
@@ -33,12 +52,7 @@ export function saveSettings(settings: Partial<AppSettings>): void {
   store.set('settings', { ...current, ...settings })
 }
 
-/**
- * Hàm hỗ trợ lưu API key nhanh cho 1 provider
- * @param provider 'gemini', 'claude', 'openai', ...
- * @param key Chuỗi API Key
- */
-export function updateApiKey(provider: string, key: string): void {
+export function updateApiKey(provider: import('../../shared/types').AIProvider, key: string): void {
   const current = getSettings()
   const apiKeys = { ...current.apiKeys, [provider]: key }
   store.set('settings', { ...current, apiKeys })

@@ -33,3 +33,20 @@
 - [BE] `src/main/services/translationEngine.ts` — Thêm `preFlightAnalyzer` đếm số block, character trước khi dịch.
 **Status:** ✅ Complete
 **Notes:** Sử dụng `responseMimeType: 'application/json'` cho Gemini là rất quan trọng để đảm bảo tính nhất quán của dòng lệnh. Claude/OpenAI sẽ được mở rộng dễ dàng thông qua interface `aiService` sau này.
+
+## [2026-04-29 16:52] Cập nhật AIService sang kiến trúc Adapter Pattern
+**Requested:** Ghi đè file src/main/api/aiService.ts bằng đoạn code sử dụng Adapter Pattern.
+**Delivered:**
+- [BE] `src/main/api/aiService.ts` — Áp dụng Adapter Pattern (`IAITranslator`) để bọc các class `GeminiTranslator` và `OpenAITranslator`. Viết thêm System Prompt nâng cao hỗ trợ `glossaryText`.
+- [BE] `src/main/services/translationEngine.ts` — Chuyển từ gọi hàm trực tiếp sang sử dụng class manager tĩnh `AIService.translateBatch(texts, glossaryText)`. 
+**Status:** ✅ Complete
+**Notes:** `glossaryText` hiện tại truyền vào là chuỗi rỗng (`""`). Ở bước sau, khi lấy từ điển từ DB, chúngrow sẽ tự động gộp và nối vào biến này để truyền xuống AI.
+
+## [2026-04-29 17:18] Nâng cấp Settings Module và Hybrid Prompt
+**Requested:** Implement Settings 5 nhóm theo chuẩn thiết kế và tích hợp Hybrid Prompting vào AI Service.
+**Delivered:**
+- [BE] `src/shared/types.ts` — Định nghĩa chuẩn 5 nhóm Setting (AI Config, Prompting, Queue, TM, UI) bao gồm các biến `customEndpoint`, `temperature`, `userCustomPrompt`, `costWarningThreshold`, `tmFuzzyThreshold`...
+- [BE] `src/main/store/settings.ts` — Áp dụng `defaultSettings` chuẩn xác theo document. Dùng `electron-store` để lưu trữ, không dùng SQLite.
+- [BE] `src/main/api/aiService.ts` — Viết lại `getSystemPrompt` thành kiến trúc **Hybrid Prompt**: Tách Part A (Hardcoded rules) và Part B (Văn phong từ `userCustomPrompt` + TỪ ĐIỂN). Đồng thời pass object `settings` xuống cho các Translator (như Gemini) để truyền `targetLanguage`, `temperature`, và `customEndpoint` một cách linh động.
+**Status:** ✅ Complete
+**Notes:** Chức năng đổi ngôn ngữ đích (targetLanguage) và base URL tùy chỉnh (customEndpoint) đã hoàn toàn khả dụng ở lớp Backend. Đợi có UI là hoạt động trơn tru.

@@ -123,6 +123,24 @@ function setupSchema(db: Database.Database): void {
         VALUES('delete', old.id, old.original_text, old.translated_text);
       END;
     `)
+
+    // 6. Bảng glossaries: Quản lý từ điển thuật ngữ
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS glossaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_text TEXT UNIQUE NOT NULL,
+        target_text TEXT NOT NULL,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `)
+
+    // MIGRATION CHECK: Đảm bảo bảng translation_blocks có cột translated_by
+    const tableInfo = db.prepare(`PRAGMA table_info(translation_blocks);`).all() as any[];
+    const hasTranslatedBy = tableInfo.some(col => col.name === 'translated_by');
+    if (!hasTranslatedBy) {
+      db.exec(`ALTER TABLE translation_blocks ADD COLUMN translated_by TEXT DEFAULT 'none';`);
+    }
   })
 
   // Thực thi Transaction
