@@ -21,3 +21,15 @@
 - [BE] `src/main/parser/rpyParser.ts` — Viết logic `importRpyToDatabase` sử dụng Bulk Insert/Transaction trên SQLite để tối ưu hóa I/O cho file lớn.
 **Status:** ✅ Complete
 **Notes:** Xử lý `block_type = 'string'` bằng cách tự động đánh index băm do string không có ID như dialogue. Mặc định dialogue tags là Dialogue và string tags là UI/Menu.
+
+## [2026-04-29 16:46] Triển khai Phase 2: Translation Engine, TM & Queue System
+**Requested:** Triển khai phase tiếp theo.
+**Delivered:**
+- [BE] `src/main/store/settings.ts` — Xây dựng Settings Manager bằng `electron-store` để lưu `apiKeys`, `activeModelId`, `batchSize`, v.v. xuống ổ cứng.
+- [BE] `src/main/api/aiService.ts` — Viết hàm `translateBatchWithGemini` kết nối API `@google/generative-ai`. Đặc biệt cấu hình `responseSchema` là JSON Array (type: STRING) để ép AI trả về mảng kết quả ổn định, không bị vỡ dòng so với chuỗi văn bản thông thường.
+- [BE] `src/main/services/translationEngine.ts` — Viết logic `startBackgroundQueue`: vòng lặp lấy từng mẻ text (20 dòng) có trạng thái 'empty' để xử lý.
+- [BE] `src/main/services/translationEngine.ts` — **Tích hợp TM (Translation Memory):** Query DB TM trước khi gọi API. Auto-fill nếu cache Hit, chỉ gọi AI nếu cache Miss.
+- [BE] `src/main/services/translationEngine.ts` — **Rate Limiting:** Bắt lỗi 429 và sử dụng Exponential Backoff để thử lại tự động mà không bị crash.
+- [BE] `src/main/services/translationEngine.ts` — Thêm `preFlightAnalyzer` đếm số block, character trước khi dịch.
+**Status:** ✅ Complete
+**Notes:** Sử dụng `responseMimeType: 'application/json'` cho Gemini là rất quan trọng để đảm bảo tính nhất quán của dòng lệnh. Claude/OpenAI sẽ được mở rộng dễ dàng thông qua interface `aiService` sau này.

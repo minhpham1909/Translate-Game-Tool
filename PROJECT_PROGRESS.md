@@ -19,13 +19,22 @@
 - [x] Hỗ trợ parse dialogue blocks và string blocks (bảo toàn tuyệt đối `indentation`).
 - [x] Tích hợp logic import vào cơ sở dữ liệu (sử dụng Transactions).
 
+## [2026-04-29] Session: Phase 2 - Translation Engine
+### Completed
+- [x] Tạo `src/main/store/settings.ts` để lưu thiết lập API Key xuống hệ thống (bằng `electron-store`).
+- [x] Tạo `src/main/api/aiService.ts` dùng Gemini API (với chuẩn JSON Array output, prompt nghiêm ngặt giữ nguyên biến/tags).
+- [x] Tạo `src/main/services/translationEngine.ts` với `startBackgroundQueue()`.
+- [x] Logic Translation Memory: Check TM cache -> Call API -> Save Cache.
+- [x] Exponential backoff cho lỗi rate limit (429).
+- [x] `preFlightAnalyzer` đếm block rỗng và ước lượng chữ.
+
 ### Current State
-- Đã có khả năng parse file `.rpy` thành dữ liệu thô và push vào database.
-- Tuy nhiên chưa nối việc này vào UI (Dashboard). Do đó người dùng chưa thể tự chọn thư mục từ giao diện.
+- Backend Pipeline gần như hoàn chỉnh: Parser -> DB -> Translation Queue (có TM & Rate limit) -> DB.
+- Cần có IPC Channels để nối tất cả các backend services ra Frontend.
 
 ### Next Steps
-- Bắt đầu triển khai Phase 2: Translation Engine, TM & Queue System (Gọi API AI)
-- Gắn các IPC handlers để Renderer có thể yêu cầu parse folder.
+- Triển khai Phase 3: Auto-QA Linter & Backend Utilities (Bao gồm Safe Export).
+- Gắn các handler IPC (ví dụ `start-translation`, `scan-folder`).
 
 ### Known Issues / Blockers
-- Chưa có giao diện UI để chọn folder và kích hoạt parser. Cần làm UI sau.
+- Không có lỗi nào hiện tại. UI vẫn đang thiếu.
