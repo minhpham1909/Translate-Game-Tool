@@ -1,6 +1,6 @@
 import { getDatabase } from '../store/database'
 import { AIService } from '../api/aiService'
-import { TranslationBlock, AppSettings } from '../../shared/types'
+import { TranslationBlock } from '../../shared/types'
 import { getSettings } from '../store/settings'
 import { validateTranslation } from '../utils/qaLinter'
 

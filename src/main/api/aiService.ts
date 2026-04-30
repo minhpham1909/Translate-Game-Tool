@@ -96,32 +96,36 @@ class GeminiTranslator implements IAITranslator {
 // ============================================================================
 class ClaudeTranslator implements IAITranslator {
   providerName = 'Claude';
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {}
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+  // TODO: Lưu các tham số khi triển khai thực sự
+  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
+  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
     throw new Error("Claude is not yet implemented.");
   }
 }
 
 class GPTTranslator implements IAITranslator {
   providerName = 'GPT';
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {}
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+  // TODO: Lưu các tham số khi triển khai thực sự
+  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
+  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
     throw new Error("GPT (OpenAI) is not yet implemented.");
   }
 }
 
 class DeepSeekTranslator implements IAITranslator {
   providerName = 'DeepSeek';
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {}
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+  // TODO: Lưu các tham số khi triển khai thực sự
+  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
+  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
     throw new Error("DeepSeek is not yet implemented.");
   }
 }
 
 class GrokTranslator implements IAITranslator {
   providerName = 'Grok';
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {}
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+  // TODO: Lưu các tham số khi triển khai thực sự
+  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
+  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
     throw new Error("Grok is not yet implemented.");
   }
 }

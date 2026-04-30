@@ -27,8 +27,6 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
   
   let state = ParserState.OUTSIDE
   let currentBlockHash = ''
-  let currentCharacterId: string | null = null
-  let currentOriginalText = ''
   
   // Regex patterns
   // Dialogue header: `translate vietnamese start_a170b500:`
@@ -39,9 +37,10 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
   // G1: indent, G2: language
   const stringHeaderRegex = /^(\s*)translate\s+(\w+)\s+strings:$/
   
-  // Comment line inside dialogue: `# e "Original text here"`
-  // G1: indent, G2: character_id (optional), G3: original text
-  const commentRegex = /^(\s*)#\s*([a-zA-Z0-9_]*)\s+"(.*)"$/
+  // Comment line (Cross-Translation: sẽ bỏ qua toàn bộ khi parse - chỉ lấy dòng active)
+  // const commentRegex = /^(\s*)#\s*([a-zA-Z0-9_]*)\s+"(.*)"$/
+  // NOTE: Không sử dụng commentRegex vì Cross-Translation chỉ đọc dòng active (tiếng Anh)
+  // và bỏ qua hoàn toàn dòng comment (tiếng Nhật)
   
   // Translated dialogue line: `e "Translated text"`
   // G1: indent, G2: character_id (optional), G3: translated text
@@ -69,8 +68,6 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
       if (dialogueMatch) {
         state = ParserState.IN_DIALOGUE_BLOCK
         currentBlockHash = dialogueMatch[3]
-        currentCharacterId = null
-        currentOriginalText = ''
         continue
       }
 
