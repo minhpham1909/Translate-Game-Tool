@@ -69,7 +69,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
           <DialogTitle className="text-lg font-semibold">Global Settings</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-h-0">
           {/* Left Tab Menu */}
           <nav className="w-48 flex-shrink-0 border-r border-border bg-muted/30 p-2">
             {tabs.map((tab) => (

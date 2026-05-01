@@ -21,6 +21,8 @@ import { TranslationWorkspace } from '@renderer/components/cat-tool/TranslationW
 import { BottomBar, LogEntry } from '@renderer/components/cat-tool/BottomBar'
 import { SettingsModal } from '@renderer/components/cat-tool/SettingsModal'
 import { UITranslationBlock } from '@renderer/components/cat-tool/TranslationCard'
+import { TooltipProvider } from '@renderer/components/ui/tooltip'
+import { useEffect } from 'react'
 
 // ============================================================
 // MOCK DATA — Sẽ thay bằng window.api ở Step 3 (Phase 4E)
@@ -164,8 +166,43 @@ function CATWorkspace({
     console.log('[TODO] AI Translate block:', blockId)
   }
 
+  // --- Keyboard Shortcuts ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Bỏ qua nếu user đang gõ trong input/textarea
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      if (e.key === 'F1') {
+        e.preventDefault()
+        openModal('keyboardShortcuts')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        openModal('export')
+      } else if (e.ctrlKey && e.key === ',') {
+        e.preventDefault()
+        openModal('settings')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        openModal('searchReplace')
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'q') {
+        e.preventDefault()
+        openModal('qaReport')
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault()
+        openModal('glossary')
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        openModal('preflight')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+    <div className="flex flex-col h-full w-full bg-background text-foreground overflow-hidden">
       <TopHeader
         activeFileName={activeFile?.file_name}
         sourceLanguage="english"
@@ -275,10 +312,9 @@ function AppContent() {
     console.log('[TODO] Save project config:', config)
     setHasProject(true)
   }
-
   if (!hasProject) {
     return (
-      <>
+      <TooltipProvider>
         <WelcomeScreen
           hasApiKey={false} // TODO: Đọc từ electron-store ở Phase 4E
           recentProjects={[]}
@@ -291,13 +327,20 @@ function AppContent() {
         <SetupWizardModal
           open={isWizardOpen}
           onOpenChange={setIsWizardOpen}
-          onComplete={handleProjectCreated}
+          onComplete={(config) => {
+            console.log('[App] New project setup complete:', config)
+            setHasProject(true)
+          }}
         />
-      </>
+      </TooltipProvider>
     )
   }
 
-  return <CATWorkspace onNewProject={() => setIsWizardOpen(true)} />
+  return (
+    <TooltipProvider>
+      <CATWorkspace onNewProject={() => setIsWizardOpen(true)} />
+    </TooltipProvider>
+  )
 }
 
 /**

@@ -30,7 +30,12 @@ const defaultSettings: AppSettings = {
 
 // Khởi tạo electron-store. Data sẽ được lưu dưới dạng file JSON 
 // trong thư mục AppData của hệ điều hành.
-const store = new Store<{ settings: AppSettings, project: ProjectConfig | null }>({
+// Xử lý ESM to CJS interop cho electron-store
+const StoreClass = ((Store && typeof Store !== 'function' && 'default' in Store) 
+  ? (Store as any).default 
+  : Store) as typeof Store;
+
+const store = new StoreClass<{ settings: AppSettings, project: ProjectConfig | null }>({
   defaults: {
     settings: defaultSettings,
     project: null

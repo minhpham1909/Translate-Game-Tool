@@ -63,3 +63,15 @@
 - [BE] `src/main/services/exportService.ts` — Thêm hàm `exportFile()` với logic fallback an toàn và giữ nguyên key `old` strings; thêm hàm `restoreBackup()`.
 **Status:** ✅ Complete
 **Notes:** Chấp nhận thiết kế Cross-Translation của user. Các block bị lỗi Linter sẽ tự động fallback về tiếng Anh thay vì xuất tiếng Việt để chống crash game.
+
+## [2026-05-01 13:58] Phase 4E - Backend Core Files & IPC Bridge
+**Requested:** Cấu hình Backend API Services (Phase 4E) và expose lên frontend qua IPC.
+**Delivered:**
+- [BE] `src/main/services/glossaryService.ts` — Viết các hàm CRUD thao tác với DB SQLite cho Glossary.
+- [BE] `src/main/services/tmService.ts` — Viết hàm CRUD và fuzzy search (`searchTM`, `clearUnusedTM`) cho Translation Memory.
+- [BE] `src/main/services/searchService.ts` — Viết hàm `searchBlocks` kết hợp query LIKE trên SQLite và Regex/Whole Word mapping trên JS, và hàm `replaceBlockText`.
+- [BE] `src/main/ipcHandler.ts` — Đăng ký 15 kênh IPC (`ipcMain.handle`) kết nối trực tiếp đến các file Service (Project, Glossary, TM, Search).
+- [BE] `src/main/index.ts` — Móc `registerIpcHandlers()` vào luồng khởi tạo app.
+- [FE/BE] `src/preload/index.ts` và `src/preload/index.d.ts` — Cập nhật cấu trúc `window.api` (gom nhóm project, glossary, tm, search) thành strongly typed, có code hint rõ ràng.
+**Status:** ✅ Complete
+**Notes:** Quá trình IPC cho `exportService` và update `recentProjects` của `settings` sẽ được bổ sung tiếp ở Phase 4 nếu cần. Tạm thời đủ các handler thiết yếu cho UI.

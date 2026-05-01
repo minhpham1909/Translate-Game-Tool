@@ -99,7 +99,7 @@ export function TopHeader({
                 <span className="hidden xl:inline">Pre-flight</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Phân tích & dịch hàng loạt</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Phân tích & dịch hàng loạt <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+A</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* Search */}
@@ -110,7 +110,7 @@ export function TopHeader({
                 <span className="hidden xl:inline">Search</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Tìm & thay thế toàn project (Ctrl+F)</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Tìm & thay thế toàn project <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+F</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* QA Report */}
@@ -120,7 +120,7 @@ export function TopHeader({
                 <ShieldAlert className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>QA Report Dashboard</p></TooltipContent>
+            <TooltipContent side="bottom"><p>QA Report Dashboard <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+Q</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* Glossary */}
@@ -130,7 +130,7 @@ export function TopHeader({
                 <BookMarked className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Glossary Manager</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Glossary Manager <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+G</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* TM Manager */}
@@ -150,7 +150,7 @@ export function TopHeader({
                 <Keyboard className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Keyboard Shortcuts (F1)</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Keyboard Shortcuts <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">F1</kbd></p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />
@@ -173,16 +173,21 @@ export function TopHeader({
                 <Settings className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Cài đặt (Ctrl+,)</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Cài đặt <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+,</kbd></p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />
 
           {/* Export */}
-          <Button id="btn-open-export" size="sm" className="h-7 px-3 text-xs gap-1.5" onClick={onExportClick}>
-            <Download className="size-3.5" />
-            Export
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-export" size="sm" className="h-7 px-3 text-xs gap-1.5" onClick={onExportClick}>
+                <Download className="size-3.5" />
+                Export
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Xuất file dịch <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+E</kbd></p></TooltipContent>
+          </Tooltip>
         </div>
       </TooltipProvider>
     </header>

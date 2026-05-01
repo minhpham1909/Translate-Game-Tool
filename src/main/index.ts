@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase, closeDatabase } from './store/database'
+import { registerIpcHandlers } from './ipcHandler'
 
 function createWindow(): void {
   // Create the browser window.
@@ -52,6 +53,9 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+
+  // Register all Backend Services IPC Handlers
+  registerIpcHandlers()
 
   try {
     initDatabase()

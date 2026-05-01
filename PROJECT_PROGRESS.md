@@ -55,3 +55,21 @@
 
 ### Known Issues / Blockers
 - UI chưa bắt đầu. Cần làm UI Setup Wizard để kích hoạt luồng.
+
+## [2026-05-01] Session: Phase 4 UI Bug Fix & Phase 4E Backend Core
+### Completed
+- [x] Fix lỗi layout của `DialogContent` đè nút Cancel (X): Chuyển `showCloseButton = false` mặc định và đổi `grid` thành `flex flex-col` để fix tỷ lệ Header/Body/Footer.
+- [x] Fix lỗi layout body của Settings Modal khi switch qua tab có ít nội dung bị co lại (thêm `min-h-0`).
+- [x] Tạo `src/main/services/glossaryService.ts` (CRUD).
+- [x] Tạo `src/main/services/tmService.ts` (CRUD, Search, Upsert).
+- [x] Tạo `src/main/services/searchService.ts` (Global FTS/Regex Search & Replace).
+- [x] Tạo `src/main/ipcHandler.ts` để map 15 kênh IPC cho Project, Glossary, TM, Search.
+- [x] Đăng ký `registerIpcHandlers()` vào `main/index.ts`.
+- [x] Cập nhật `src/preload/index.ts` và `index.d.ts` để expose `window.api` cho Frontend.
+
+### Current State
+- UI cơ bản (10 màn hình) đã hoàn thành, layout flex fix chuẩn xác.
+- Backend Core đã đủ service và có IPC Bridge sẵn sàng để React (Renderer) gọi.
+
+### Next Steps
+- Thay thế Mock Data trong React UI bằng cách gọi `window.api` thật để kết nối toàn bộ luồng từ Parser -> DB -> UI -> AI.
