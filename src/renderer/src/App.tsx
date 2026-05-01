@@ -4,7 +4,7 @@
  * Tất cả modals được quản lý ở đây và truyền xuống qua props.
  * Step 2: Mock Data. Step 3 sẽ kết nối window.api thật.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ThemeProvider } from '@renderer/context/ThemeContext'
 import { WelcomeScreen } from '@renderer/components/screens/WelcomeScreen'
 import { SetupWizardModal } from '@renderer/components/screens/SetupWizardModal'
@@ -18,82 +18,26 @@ import { KeyboardShortcutsModal } from '@renderer/components/screens/KeyboardSho
 import { TopHeader } from '@renderer/components/cat-tool/TopHeader'
 import { LeftSidebar, SidebarFile } from '@renderer/components/cat-tool/LeftSidebar'
 import { TranslationWorkspace } from '@renderer/components/cat-tool/TranslationWorkspace'
-import { BottomBar, LogEntry } from '@renderer/components/cat-tool/BottomBar'
+import { BottomBar, LogEntry, LogType } from '@renderer/components/cat-tool/BottomBar'
 import { SettingsModal } from '@renderer/components/cat-tool/SettingsModal'
 import { UITranslationBlock } from '@renderer/components/cat-tool/TranslationCard'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
-import { useEffect } from 'react'
-
 // ============================================================
-// MOCK DATA — Sẽ thay bằng window.api ở Step 3 (Phase 4E)
-// ============================================================
-const MOCK_FILES: SidebarFile[] = [
-  { id: 1, file_name: 'script.rpy',     file_path: 'script.rpy',     status: 'in_progress', total_blocks: 1250, translated_blocks: 937  },
-  { id: 2, file_name: 'options.rpy',    file_path: 'options.rpy',    status: 'completed',   total_blocks: 85,   translated_blocks: 85   },
-  { id: 3, file_name: 'screens.rpy',    file_path: 'screens.rpy',    status: 'in_progress', total_blocks: 320,  translated_blocks: 144  },
-  { id: 4, file_name: 'chapter1.rpy',   file_path: 'chapter1.rpy',   status: 'pending',     total_blocks: 2100, translated_blocks: 0    },
-  { id: 5, file_name: 'chapter2.rpy',   file_path: 'chapter2.rpy',   status: 'warning',     total_blocks: 1890, translated_blocks: 1172 },
-  { id: 6, file_name: 'characters.rpy', file_path: 'characters.rpy', status: 'completed',   total_blocks: 156,  translated_blocks: 156  },
-  { id: 7, file_name: 'gui.rpy',        file_path: 'gui.rpy',        status: 'in_progress', total_blocks: 420,  translated_blocks: 126  },
-]
 
-const MOCK_BLOCKS: UITranslationBlock[] = [
-  {
-    id: 1, block_hash: '#start_001', line_index: 45, character_id: 'Eileen', block_type: 'dialogue',
-    original_text: "Welcome to the Ren'Py tutorial! This is a visual novel engine.",
-    translated_text: 'Chào mừng đến với hướng dẫn Ren\'Py! Đây là một engine visual novel.',
-    status: 'approved',
-  },
-  {
-    id: 2, block_hash: '#start_002', line_index: 46, character_id: 'Eileen', block_type: 'dialogue',
-    original_text: "I'll be your guide today. Let me show you around.",
-    translated_text: 'Hôm nay tôi sẽ là hướng dẫn viên của bạn.',
-    status: 'draft',
-  },
-  {
-    id: 3, block_hash: '#start_003', line_index: 47, character_id: null, block_type: 'dialogue',
-    original_text: 'The screen fades to black as gentle music begins to play...',
-    translated_text: null,
-    status: 'empty',
-  },
-  {
-    id: 4, block_hash: '#start_004', line_index: 52, character_id: 'Player', block_type: 'dialogue',
-    original_text: 'This place is amazing! I {i}can\'t{/i} believe I\'m finally here.',
-    translated_text: 'Nơi này thật tuyệt vời! Tôi không thể tin là tôi ở đây.',
-    status: 'warning',
-  },
-  {
-    id: 5, block_hash: '#menu_001', line_index: 58, character_id: null, block_type: 'string',
-    original_text: 'What would you like to do?',
-    translated_text: 'Bạn muốn làm gì?',
-    status: 'approved',
-  },
-  {
-    id: 6, block_hash: '#choice_001', line_index: 59, character_id: null, block_type: 'string',
-    original_text: 'Explore the garden',
-    translated_text: 'Khám phá khu vườn',
-    status: 'approved',
-  },
-  {
-    id: 7, block_hash: '#choice_002', line_index: 60, character_id: null, block_type: 'string',
-    original_text: 'Talk to Eileen',
-    translated_text: null,
-    status: 'empty',
-  },
-  {
-    id: 8, block_hash: '#garden_001', line_index: 85, character_id: 'Eileen', block_type: 'dialogue',
-    original_text: 'The roses here are beautiful this time of year. My grandmother planted them.',
-    translated_text: 'Những bông hồng ở đây đặc biệt đẹp. Bà tôi đã trồng chúng.',
-    status: 'draft',
-  },
-]
 
-const MOCK_LOGS: LogEntry[] = [
-  { type: 'info',    message: 'Project loaded: visual_novel_en',             timestamp: '19:30:15' },
-  { type: 'success', message: 'Parsing complete. Found 7 files, 6221 blocks.', timestamp: '19:30:16' },
-  { type: 'info',    message: 'Translation Memory loaded: 15,234 entries',   timestamp: '19:30:17' },
-  { type: 'warning', message: 'Format tag mismatch in block #start_004',     timestamp: '19:31:02' },
-]
+const MAX_LOGS = 200
+
+function normalizeLogType(type: unknown): LogType {
+  switch (type) {
+    case 'info':
+    case 'warning':
+    case 'error':
+    case 'success':
+      return type
+    default:
+      return 'info'
+  }
+}
 
 // ============================================================
 // MODAL STATE TYPE — Gom tất cả modals vào 1 object
@@ -123,52 +67,209 @@ function CATWorkspace({
   onNewProject,
 }: {
   onNewProject: () => void
-}) {
-  const [files] = useState<SidebarFile[]>(MOCK_FILES)
-  const [activeFileId, setActiveFileId] = useState<number | null>(1)
-  const [blocks, setBlocks] = useState<UITranslationBlock[]>(MOCK_BLOCKS)
+}): ReactElement {
+  const [files, setFiles] = useState<SidebarFile[]>([])
+  const [activeFileId, setActiveFileId] = useState<number | null>(null)
+  const [blocks, setBlocks] = useState<UITranslationBlock[]>([])
   const [modals, setModals] = useState<ModalState>(DEFAULT_MODAL_STATE)
   const [preflightScope, setPreflightScope] = useState<'file' | 'project'>('file')
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [preflightData, setPreflightData] = useState({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
+  const activeFileIdRef = useRef<number | null>(null)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const fetchFiles = async (): Promise<void> => {
+    try {
+      const data = await window.api.workspace.getFiles()
+      setFiles(data)
+      if (data.length > 0) {
+        setActiveFileId((prev) => (prev === null ? data[0].id : prev))
+      }
+    } catch (err) {
+      console.error('Failed to fetch files:', err)
+    }
+  }
+
+  const fetchBlocks = async (fileId: number): Promise<void> => {
+    try {
+      const data = await window.api.workspace.getBlocks(fileId)
+      setBlocks(data)
+    } catch (err) {
+      console.error('Failed to fetch blocks:', err)
+    }
+  }
+
+  // Khởi tạo
+  useEffect(() => {
+    let cancelled = false
+    void window.api.workspace
+      .getFiles()
+      .then((data) => {
+        if (cancelled) return
+        setFiles(data)
+        if (data.length > 0) {
+          setActiveFileId((prev) => (prev === null ? data[0].id : prev))
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch files:', err)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Khi chọn file
+  useEffect(() => {
+    if (activeFileId === null) return
+    let cancelled = false
+    void window.api.workspace
+      .getBlocks(activeFileId)
+      .then((data) => {
+        if (cancelled) return
+        setBlocks(data)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch blocks:', err)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeFileId])
+
+  useEffect(() => {
+    activeFileIdRef.current = activeFileId
+  }, [activeFileId])
+
+  // Subscribe to backend logs + progress
+  useEffect(() => {
+    const unsubscribeLog = window.api.events.onSystemLog((entry) => {
+      setLogs((prev) => {
+        const next = [
+          ...prev,
+          {
+            type: normalizeLogType(entry.type),
+            message: entry.message,
+            timestamp: entry.timestamp,
+          },
+        ]
+        return next.length > MAX_LOGS ? next.slice(next.length - MAX_LOGS) : next
+      })
+    })
+
+    const unsubscribeProgress = window.api.events.onEngineProgress(() => {
+      // Debounce refresh; queue can emit often.
+      if (refreshTimerRef.current) return
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null
+        fetchFiles()
+        const fid = activeFileIdRef.current
+        if (fid !== null) fetchBlocks(fid)
+      }, 500)
+    })
+
+    return () => {
+      unsubscribeLog()
+      unsubscribeProgress()
+    }
+  }, [])
 
   const activeFile = files.find((f) => f.id === activeFileId)
   const totalBlocks = files.reduce((acc, f) => acc + f.total_blocks, 0)
   const translatedBlocks = files.reduce((acc, f) => acc + f.translated_blocks, 0)
 
-  const openModal = (key: keyof ModalState) =>
+  const openModal = (key: keyof ModalState): void =>
     setModals((prev) => ({ ...prev, [key]: true }))
-  const closeModal = (key: keyof ModalState) =>
+  const closeModal = (key: keyof ModalState): void =>
     setModals((prev) => ({ ...prev, [key]: false }))
 
-  const handleTranslationChange = (blockId: number, value: string) => {
+  const handleTranslationChange = async (blockId: number, value: string): Promise<void> => {
+    // 1. Optimistic update (UI update nhanh)
+    const newStatus = value.trim() ? 'draft' : 'empty'
     setBlocks((prev) =>
       prev.map((b) =>
         b.id === blockId
-          ? { ...b, translated_text: value, status: value.trim() ? (b.status === 'empty' ? 'draft' : b.status) : 'empty' }
+          ? { ...b, translated_text: value, status: newStatus }
           : b
       )
     )
+
+    // 2. Gọi API lưu DB
+    await window.api.workspace.updateBlock(blockId, value, newStatus)
+    // 3. Cập nhật Sidebar (Progress)
+    fetchFiles()
   }
 
-  const handleApprove = (blockId: number) => {
+  const handleApprove = async (blockId: number): Promise<void> => {
     setBlocks((prev) =>
       prev.map((b) => (b.id === blockId ? { ...b, status: 'approved' } : b))
     )
+    const block = blocks.find((b) => b.id === blockId)
+    if (block) {
+      await window.api.workspace.updateBlock(blockId, block.translated_text || '', 'approved')
+      fetchFiles()
+    }
   }
 
-  const handleRevert = (blockId: number) => {
+  const handleRevert = async (blockId: number): Promise<void> => {
     setBlocks((prev) =>
       prev.map((b) => (b.id === blockId ? { ...b, translated_text: null, status: 'empty' } : b))
     )
+    await window.api.workspace.updateBlock(blockId, null, 'empty')
+    fetchFiles()
   }
 
-  const handleAITranslate = (blockId: number) => {
-    // TODO: Gọi window.api.engine.translateBatch([blockId]) ở Phase 4E
-    console.log('[TODO] AI Translate block:', blockId)
+  const handleAITranslate = (blockId: number): void => {
+    void (async () => {
+      try {
+        await window.api.engine.translateBatch([blockId])
+        if (activeFileId !== null) await fetchBlocks(activeFileId)
+        await fetchFiles()
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('AI translate failed:', message)
+        setLogs((prev) => {
+          const next = [
+            ...prev,
+            {
+              type: 'error' as const,
+              message: message || 'AI translate failed',
+              timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+            },
+          ]
+          return next.length > MAX_LOGS ? next.slice(next.length - MAX_LOGS) : next
+        })
+      }
+    })()
   }
+
+  // Load preflight data when modal opens or scope changes
+  useEffect(() => {
+    if (!modals.preflight) return
+    void (async () => {
+      try {
+        if (preflightScope === 'file') {
+          if (activeFileId === null) {
+            setPreflightData({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
+            return
+          }
+          const data = await window.api.engine.preflight(activeFileId)
+          setPreflightData(data)
+        } else {
+          const data = await window.api.engine.preflight()
+          setPreflightData(data)
+        }
+      } catch (err) {
+        console.error('Failed to load preflight:', err)
+      }
+    })()
+  }, [modals.preflight, preflightScope, activeFileId])
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       // Bỏ qua nếu user đang gõ trong input/textarea
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
@@ -237,7 +338,7 @@ function CATWorkspace({
         totalBlocks={totalBlocks}
         translatedBlocks={translatedBlocks}
         apiCost={0.0012}
-        logs={MOCK_LOGS}
+        logs={logs}
         isConnected={true}
       />
 
@@ -246,11 +347,17 @@ function CATWorkspace({
 
       <PreflightModal
         open={modals.preflight}
-        onOpenChange={(o) => closeModal('preflight')}
-        data={{ pendingBlocks: 3284, estimatedCharacters: 145000, estimatedCost: 0.58, activeFileName: activeFile?.file_name }}
+        onOpenChange={() => closeModal('preflight')}
+        data={{ ...preflightData, activeFileName: activeFile?.file_name }}
         scope={preflightScope}
         onScopeChange={setPreflightScope}
-        onConfirm={() => console.log('[TODO] Start batch translate')}
+        onConfirm={() => {
+          if (preflightScope === 'file') {
+            if (activeFileId !== null) void window.api.engine.startQueue({ fileId: activeFileId })
+          } else {
+            void window.api.engine.startQueue()
+          }
+        }}
       />
 
       <ExportModal
@@ -304,14 +411,19 @@ function CATWorkspace({
 // ============================================================
 // APP ROOT — Điều phối Welcome ↔ Workspace
 // ============================================================
-function AppContent() {
-  const [hasProject, setHasProject] = useState(false) // TODO: Đọc từ electron-store ở Phase 4E
+function AppContent(): ReactElement {
+  const [hasProject, setHasProject] = useState(false)
   const [isWizardOpen, setIsWizardOpen] = useState(false)
 
-  const handleProjectCreated = (config: { gameFolderPath: string; sourceLanguage: string; targetLanguage: string }) => {
-    console.log('[TODO] Save project config:', config)
-    setHasProject(true)
-  }
+  // Khởi động: check xem có project config nào trong DB không
+  useEffect(() => {
+    const checkProject = async (): Promise<void> => {
+      const project = await window.api.project.getCurrent()
+      setHasProject(!!project)
+    }
+    checkProject()
+  }, [])
+
   if (!hasProject) {
     return (
       <TooltipProvider>
@@ -346,7 +458,7 @@ function AppContent() {
 /**
  * App — Root component bọc ThemeProvider.
  */
-export default function App() {
+export default function App(): ReactElement {
   return (
     <ThemeProvider defaultTheme="dark">
       <AppContent />

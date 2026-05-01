@@ -75,3 +75,38 @@
 - [FE/BE] `src/preload/index.ts` và `src/preload/index.d.ts` — Cập nhật cấu trúc `window.api` (gom nhóm project, glossary, tm, search) thành strongly typed, có code hint rõ ràng.
 **Status:** ✅ Complete
 **Notes:** Quá trình IPC cho `exportService` và update `recentProjects` của `settings` sẽ được bổ sung tiếp ở Phase 4 nếu cần. Tạm thời đủ các handler thiết yếu cho UI.
+
+## [2026-05-01 14:38] Phase 4E - Chunk 1: Workspace Infrastructure & Data Binding
+**Requested:** Xóa bỏ Mock Data ở CAT Workspace, nối giao diện với API DB thực tế qua IPC.
+**Delivered:**
+- [BE] `src/main/services/workspaceService.ts` — Thêm service đọc file và translation block từ SQLite, hỗ trợ update status.
+- [BE] `src/main/ipcHandler.ts` — Đăng ký các handle `workspace:getFiles`, `workspace:getBlocks`, `workspace:updateBlock`.
+- [FE] `src/preload/index.d.ts` & `src/preload/index.ts` — Thêm định nghĩa và expose API cho `window.api.workspace`.
+- [FE] `src/renderer/src/App.tsx` — Loại bỏ biến `MOCK_FILES`, `MOCK_BLOCKS`. Viết lại logic `useEffect` để fetch data thật qua `window.api.workspace`.
+**Status:** ✅ Complete
+**Notes:** Hiện tại vì chưa có hệ thống parser file `.rpy` (sẽ làm ở Chunk 2), DB SQLite hoàn toàn trống. Giao diện sau khi cập nhật sẽ tự động rơi vào UI "Empty State" (Welcome Screen hoặc báo không có file). Đây là behavior chuẩn, chờ Chunk 2 đổ data vào.
+
+## [2026-05-01 15:26] Phase 4E - Chunk 2: Ren'Py Parser Integration
+**Requested:** Tích hợp RpyParser vào quá trình khởi tạo Project.
+**Delivered:**
+- [BE] `src/main/services/parserService.ts` — Viết hàm `parseProject()` có nhiệm vụ đệ quy quét toàn bộ file `.rpy` trong ngôn ngữ được chọn và nạp vào Database bằng `parseRpyFile`.
+- [BE] `src/main/api/projectIpc.ts` — Sửa đổi `setupProject()` thành `async`, chèn logic gọi `parseProject()` trước khi save config.
+- [FE] `src/renderer/src/components/screens/SetupWizardModal.tsx` — Nối `handleScanLanguages` và `handleStartParse` để gọi trực tiếp các API ipcMain tương ứng. Hiển thị UI tiến trình chờ.
+- [FE] `src/renderer/src/App.tsx` — Thêm trigger tự reload UI Workspace khi Project mới được lưu thành công.
+**Status:** ✅ Complete
+**Notes:** Quá trình parse hàng trăm file `.rpy` sẽ tốn vài giây đến vài phút. UI Modal sẽ bị block bằng `parseMessage` trong lúc chờ backend trả về kết quả Promise. Đã fix lỗi sót lại do xóa `MOCK_BLOCKS` không triệt để.
+
+## [2026-05-01 09:30] Fix TS Deprecation Error
+**Requested:** Sửa lỗi đỏ liên quan đến 'baseUrl' is deprecated trong tsconfig.web.json
+**Delivered:**
+- [FE] `tsconfig.web.json` — Loại bỏ `"baseUrl": "."` để tuân thủ chuẩn module resolution mới của TypeScript 5+.
+**Status:** ✅ Complete
+**Notes:** TypeScript hiện nay tự động phân giải `paths` tương đối với file config nếu không có `baseUrl`. Người dùng có thể cần Restart TS Server để VS Code cập nhật trạng thái.
+
+## [2026-05-01 09:35] Fix TS Path Resolution
+**Requested:** Sửa lỗi 'Non-relative paths are not allowed' trong tsconfig.web.json
+**Delivered:**
+- [FE] `tsconfig.web.json` — Thêm tiền tố `./` vào các đường dẫn trong `paths` để tương thích với chế độ không có `baseUrl`.
+**Status:** ✅ Complete
+**Notes:** Khi bỏ `baseUrl`, TS yêu cầu đường dẫn trong `paths` phải bắt đầu rõ ràng bằng `./`.
+

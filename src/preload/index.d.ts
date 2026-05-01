@@ -1,4 +1,74 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { ProjectConfig } from '../shared/types'
+
+type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning'
+
+export interface WorkspaceFile {
+  id: number
+  file_path: string
+  file_name: string
+  total_blocks: number
+  translated_blocks: number
+  status: 'completed' | 'in_progress' | 'pending' | 'warning'
+  updated_at: string
+}
+
+export interface WorkspaceBlock {
+  id: number
+  block_hash: string
+  line_index: number
+  character_id: string | null
+  original_text: string
+  translated_text: string | null
+  status: BlockStatus
+  block_type: 'dialogue' | 'string'
+}
+
+export interface GlossaryEntry {
+  id?: number
+  source_text: string
+  target_text: string
+  notes?: string
+  created_at?: string
+}
+
+export type GlossaryEntryInput = Omit<GlossaryEntry, 'id' | 'created_at'>
+
+export interface TMEntry {
+  id?: number
+  original_text: string
+  translated_text: string
+  usage_count: number
+  last_used_at?: string
+}
+
+export interface SearchOptions {
+  matchCase: boolean
+  wholeWord: boolean
+  useRegex: boolean
+}
+
+export interface SearchMatch {
+  blockId: number
+  fileName: string
+  lineIndex: number
+  text: string
+  matchStart: number
+  matchEnd: number
+}
+
+export type SystemLogType = 'info' | 'warning' | 'error' | 'success'
+
+export interface SystemLogEntry {
+  type: SystemLogType
+  message: string
+  timestamp: string
+}
+
+export interface EngineProgress {
+  success: number
+  error: number
+}
 
 declare global {
   interface Window {
@@ -6,24 +76,41 @@ declare global {
     api: {
       project: {
         scanLanguages: (gamePath: string) => Promise<string[]>
-        setup: (config: any) => Promise<void>
-        getCurrent: () => Promise<any>
+        setup: (config: ProjectConfig) => Promise<void>
+        getCurrent: () => Promise<ProjectConfig | null>
       }
       glossary: {
-        getAll: () => Promise<any[]>
-        add: (entry: any) => Promise<any>
-        update: (id: number, entry: any) => Promise<void>
+        getAll: () => Promise<GlossaryEntry[]>
+        add: (entry: GlossaryEntryInput) => Promise<GlossaryEntry>
+        update: (id: number, entry: GlossaryEntryInput) => Promise<void>
         delete: (id: number) => Promise<void>
       }
       tm: {
-        getAll: () => Promise<any[]>
+        getAll: () => Promise<TMEntry[]>
         delete: (id: number) => Promise<void>
         clearUnused: () => Promise<void>
-        search: (query: string) => Promise<any[]>
+        search: (query: string) => Promise<TMEntry[]>
       }
       search: {
-        searchBlocks: (query: string, options: any) => Promise<any[]>
+        searchBlocks: (query: string, options: SearchOptions) => Promise<SearchMatch[]>
         replaceBlockText: (blockId: number, newText: string, isOriginal: boolean) => Promise<void>
+      }
+      workspace: {
+        getFiles: () => Promise<WorkspaceFile[]>
+        getBlocks: (fileId: number) => Promise<WorkspaceBlock[]>
+        updateBlock: (blockId: number, text: string | null, status: BlockStatus) => Promise<void>
+      }
+
+      engine: {
+        preflight: (fileId?: number) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
+        translateBatch: (blockIds: number[]) => Promise<void>
+        startQueue: (options?: { fileId?: number }) => Promise<{ started: boolean; alreadyRunning: boolean }>
+        stopQueue: () => Promise<{ stopped: boolean }>
+      }
+
+      events: {
+        onSystemLog: (callback: (entry: SystemLogEntry) => void) => () => void
+        onEngineProgress: (callback: (progress: EngineProgress) => void) => () => void
       }
     }
   }

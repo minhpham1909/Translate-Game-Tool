@@ -5,7 +5,7 @@
  * Step 2: Chọn ngôn ngữ nguồn (scan từ game/tl/)
  * Step 3: Nhập ngôn ngữ đích + xác nhận parse
  */
-import { useState } from 'react'
+import { useState, type ReactElement } from 'react'
 import { Folder, ChevronRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -33,15 +33,13 @@ const STEP_LABELS: Record<WizardStep, string> = {
   3: 'Confirm & Parse',
 }
 
-const MOCK_LANGUAGES = ['english', 'chinese', 'japanese', 'korean']
-
 /**
  * SetupWizardModal component
  * @param open - Trạng thái mở/đóng
  * @param onOpenChange - Callback đóng modal
  * @param onComplete - Callback nhận config hoàn chỉnh
  */
-export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizardModalProps) {
+export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizardModalProps): ReactElement {
   const [currentStep, setCurrentStep] = useState<WizardStep>(1)
   const [gameFolderPath, setGameFolderPath] = useState('')
   const [sourceLanguage, setSourceLanguage] = useState('')
@@ -51,7 +49,7 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
   const [parseProgress, setParseProgress] = useState(0)
   const [parseMessage, setParseMessage] = useState('')
 
-  const resetWizard = () => {
+  const resetWizard = (): void => {
     setCurrentStep(1)
     setGameFolderPath('')
     setSourceLanguage('')
@@ -60,47 +58,55 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
     setParseProgress(0)
   }
 
-  const handleBrowseFolder = () => {
+  const handleBrowseFolder = (): void => {
     // TODO: Gọi window.api.dialog.selectFolder() ở Phase 4E
     // Tạm mock bằng prompt
     const mockPath = 'D:\\Games\\MyVisualNovel\\game'
     setGameFolderPath(mockPath)
   }
 
-  const handleScanLanguages = () => {
+  const handleScanLanguages = async (): Promise<void> => {
     if (!gameFolderPath) return
-    // TODO: Gọi window.api.project.scanLanguages(gameFolderPath) ở Phase 4E
-    setAvailableLanguages(MOCK_LANGUAGES)
-    setCurrentStep(2)
+    try {
+      const languages = await window.api.project.scanLanguages(gameFolderPath)
+      if (languages.length === 0) {
+        alert('Không tìm thấy thư mục ngôn ngữ nào trong game/tl/')
+        return
+      }
+      setAvailableLanguages(languages)
+      setCurrentStep(2)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      alert(message || 'Lỗi quét ngôn ngữ')
+    }
   }
 
-  const handleStartParse = async () => {
+  const handleStartParse = async (): Promise<void> => {
     setParseStatus('parsing')
     setParseProgress(0)
-    setParseMessage('Đang quét cấu trúc thư mục...')
+    setParseMessage('Đang quét và nạp dữ liệu vào Database, vui lòng đợi (có thể mất 1-2 phút)...')
 
-    // TODO: Thay bằng window.api.project.init() ở Phase 4E
-    // Mock tiến trình
-    const steps = [
-      { progress: 20, msg: 'Tìm thấy 12 file .rpy...' },
-      { progress: 45, msg: 'Đang parse script.rpy (3,240 blocks)...' },
-      { progress: 70, msg: 'Đang parse chapter1.rpy (2,100 blocks)...' },
-      { progress: 90, msg: 'Đang lưu vào Database...' },
-      { progress: 100, msg: 'Hoàn tất!' },
-    ]
+    try {
+      await window.api.project.setup({
+        gameFolderPath,
+        sourceLanguage,
+        targetLanguage
+      })
 
-    for (const step of steps) {
-      await new Promise((res) => setTimeout(res, 600))
-      setParseProgress(step.progress)
-      setParseMessage(step.msg)
+      setParseProgress(100)
+      setParseMessage('Hoàn tất!')
+      setParseStatus('success')
+
+      setTimeout(() => {
+        onComplete({ gameFolderPath, sourceLanguage, targetLanguage })
+        onOpenChange(false)
+        resetWizard()
+      }, 1000)
+    } catch (err: unknown) {
+      setParseStatus('error')
+      const message = err instanceof Error ? err.message : String(err)
+      setParseMessage(message || 'Lỗi khi parse dữ liệu.')
     }
-
-    setParseStatus('success')
-    setTimeout(() => {
-      onComplete({ gameFolderPath, sourceLanguage, targetLanguage })
-      onOpenChange(false)
-      resetWizard()
-    }, 800)
   }
 
   const canProceedStep1 = gameFolderPath.trim().length > 0

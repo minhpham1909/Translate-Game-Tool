@@ -73,3 +73,43 @@
 
 ### Next Steps
 - Thay thế Mock Data trong React UI bằng cách gọi `window.api` thật để kết nối toàn bộ luồng từ Parser -> DB -> UI -> AI.
+
+## [2026-05-01] Session: Phase 4E - Chunk 1
+### Completed
+- [x] Tạo `workspaceService.ts` quản lý việc lấy danh sách `files` và `translation_blocks` từ SQLite.
+- [x] Cung cấp hàm `updateBlockTranslation` và logic tự tính toán lại số block đã dịch (`updateFileStats`).
+- [x] Đăng ký 3 IPC handlers `workspace:getFiles`, `workspace:getBlocks`, `workspace:updateBlock`.
+- [x] Sửa đổi `App.tsx` ở Frontend: Xóa bỏ MOCK_FILES, MOCK_BLOCKS và thay thế bằng fetch API.
+- [x] Thêm tự động hook vào trạng thái Project mở hay chưa bằng `window.api.project.getCurrent()`.
+
+### Current State
+- UI đã lấy dữ liệu thật từ DB thông qua API. Vì DB hiện tại trống nên UI sẽ hiện trạng thái Empty hoặc báo chưa có Project.
+- Phím tắt (F1, Ctrl+S) đã hoạt động tốt.
+
+### Next Steps
+- Thực thi Chunk 2: Viết `parserService.ts` sử dụng đa luồng Regex để phân tích cú pháp `.rpy` và đưa vào DB. Kích hoạt Parser khi User tạo dự án mới ở Setup Wizard.
+
+## [2026-05-01] Session: Phase 4E - Chunk 2
+### Completed
+- [x] Tạo `src/main/services/parserService.ts` chứa hàm đệ quy tìm và parse hàng loạt file `.rpy`.
+- [x] Sửa hàm `setupProject` thành `async` và chèn logic gọi Parser trước khi hoàn thành setup.
+- [x] Nối `SetupWizardModal.tsx` vào API thật `window.api.project.scanLanguages` và `setup`.
+- [x] Hiện loading message thông báo cho người dùng chờ đợi trong lúc hệ thống parse file và nạp vào DB.
+
+### Current State
+- Người dùng đã có thể trỏ vào thư mục Game, công cụ sẽ đọc thư mục đó, quét số lượng ngôn ngữ hiện có, và nạp tất cả dữ liệu câu thoại vào Database SQLite! Ngay sau đó UI sẽ load lên màn hình làm việc (Workspace) với số liệu thật 100%.
+
+### Next Steps
+- Thực thi Chunk 3: Frontend Data Binding & User Actions cho các tính năng khác (ví dụ: Chạy API AI hàng loạt, Export). Mặc dù hiện tại người dùng đã có thể nhấn Ctrl+S để lưu từng dòng, nhưng chúng ta chưa nối API AI Translator (`window.api.engine.translateBatch`) cho nút AI trên TranslationCard.
+
+## [2026-05-01] Session: Maintenance & TS Config Fix
+### Completed
+- [x] Fix lỗi deprecation `baseUrl` trong `tsconfig.web.json` để tương thích với TypeScript 5.0+.
+- [x] Fix lỗi `Non-relative paths` bằng cách thêm `./` vào cấu hình `paths`.
+
+### Current State
+- Hệ thống hoạt động ổn định, cấu hình TypeScript được cập nhật theo chuẩn mới.
+
+### Next Steps
+- Tiếp tục thực hiện Chunk 3: Frontend Data Binding & User Actions.
+

@@ -4,9 +4,8 @@
  * Hiển thị nút tạo/mở project, danh sách recent projects,
  * và cảnh báo nếu chưa có API key.
  */
+import { type ReactElement } from 'react'
 import { FolderOpen, Plus, Clock, AlertTriangle, ChevronRight, BookOpen } from 'lucide-react'
-import { Button } from '@renderer/components/ui/button'
-import { cn } from '@renderer/lib/utils'
 
 interface RecentProject {
   gameFolderPath: string
@@ -29,7 +28,7 @@ interface WelcomeScreenProps {
  * @param onNewProject - Callback mở Setup Wizard
  * @param onOpenProject - Callback load lại project cũ
  */
-export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, onOpenProject }: WelcomeScreenProps) {
+export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, onOpenProject }: WelcomeScreenProps): ReactElement {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
 

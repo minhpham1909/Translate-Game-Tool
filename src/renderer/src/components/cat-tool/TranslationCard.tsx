@@ -4,7 +4,7 @@
  * Có status badge, warning message, và các nút action (AI, Revert, Approve).
  * Debounce 500ms trước khi gọi update DB.
  */
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, type ReactElement } from 'react'
 import { Sparkles, RotateCcw, Check, AlertTriangle } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
@@ -57,9 +57,10 @@ export function TranslationCard({
   onApprove,
   onRevert,
   onAITranslate,
-}: TranslationCardProps) {
+}: TranslationCardProps): ReactElement {
   const config = statusConfig[block.status]
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textareaKey = `${block.id}:${block.status}:${block.translated_text ?? ''}`
 
   // Debounce để tránh spam DB mỗi keystroke
   const handleTextChange = useCallback(
@@ -123,6 +124,7 @@ export function TranslationCard({
             Translation
           </p>
           <Textarea
+            key={textareaKey}
             defaultValue={block.translated_text ?? ''}
             onChange={handleTextChange}
             placeholder="Enter translation..."

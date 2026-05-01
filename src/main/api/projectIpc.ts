@@ -2,6 +2,7 @@ import path from 'path'
 import fs from 'fs-extra'
 import { getProjectConfig, saveProjectConfig } from '../store/settings'
 import { ProjectConfig } from '../../shared/types'
+import { parseProject } from '../services/parserService'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -33,7 +34,7 @@ export async function scanAvailableLanguages(gameFolderPath: string): Promise<st
 /**
  * Khởi tạo/Lưu Project mới
  */
-export function setupProject(config: ProjectConfig): void {
+export async function setupProject(config: ProjectConfig): Promise<void> {
   // Validate cơ bản
   if (!config.gameFolderPath || !config.sourceLanguage || !config.targetLanguage) {
     throw new Error('Thiếu thông tin Project Config.')
@@ -43,6 +44,10 @@ export function setupProject(config: ProjectConfig): void {
     throw new Error('Ngôn ngữ đích phải khác ngôn ngữ nguồn.')
   }
 
+  // Chạy parser quét file và nạp vào SQLite
+  await parseProject(config.gameFolderPath, config.sourceLanguage)
+
+  // Lưu cấu hình vào electron-store sau khi parse thành công
   saveProjectConfig(config)
   console.log('[ProjectSetup] Đã lưu cấu hình Project:', config)
 }

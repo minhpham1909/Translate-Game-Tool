@@ -2,15 +2,18 @@ import { ipcMain } from 'electron'
 import { scanAvailableLanguages, setupProject, getCurrentProject } from './api/projectIpc'
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
-import { searchBlocks, replaceBlockText } from './services/searchService'
+import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
+import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation } from './services/workspaceService'
+import { preFlightAnalyzer, startQueue, stopQueue, translateBatchByBlockIds } from './services/translationEngine'
+import type { ProjectConfig } from '../shared/types'
 
-export function registerIpcHandlers() {
+export function registerIpcHandlers(): void {
   // --- Project & Settings ---
   ipcMain.handle('project:scanLanguages', async (_, gamePath: string) => {
     return await scanAvailableLanguages(gamePath)
   })
   
-  ipcMain.handle('project:setup', (_, config: any) => {
+  ipcMain.handle('project:setup', (_, config: ProjectConfig) => {
     return setupProject(config)
   })
 
@@ -23,11 +26,11 @@ export function registerIpcHandlers() {
     return getAllGlossaries()
   })
   
-  ipcMain.handle('glossary:add', (_, entry: any) => {
+  ipcMain.handle('glossary:add', (_, entry: { source_text: string; target_text: string; notes?: string }) => {
     return addGlossary(entry)
   })
   
-  ipcMain.handle('glossary:update', (_, id: number, entry: any) => {
+  ipcMain.handle('glossary:update', (_, id: number, entry: { source_text: string; target_text: string; notes?: string }) => {
     return updateGlossary(id, entry)
   })
   
@@ -53,11 +56,41 @@ export function registerIpcHandlers() {
   })
 
   // --- Search & Replace ---
-  ipcMain.handle('search:searchBlocks', (_, query: string, options: any) => {
+  ipcMain.handle('search:searchBlocks', (_, query: string, options: SearchOptions) => {
     return searchBlocks(query, options)
   })
 
   ipcMain.handle('search:replaceBlockText', (_, blockId: number, newText: string, isOriginal: boolean) => {
     return replaceBlockText(blockId, newText, isOriginal)
+  })
+
+  // --- Workspace (Phase 4E) ---
+  ipcMain.handle('workspace:getFiles', () => {
+    return getWorkspaceFiles()
+  })
+
+  ipcMain.handle('workspace:getBlocks', (_, fileId: number) => {
+    return getBlocksByFile(fileId)
+  })
+
+  ipcMain.handle('workspace:updateBlock', (_, blockId: number, text: string | null, status: string) => {
+    return updateBlockTranslation(blockId, text, status)
+  })
+
+  // --- Engine (AI Translation) ---
+  ipcMain.handle('engine:preflight', (_, fileId?: number) => {
+    return preFlightAnalyzer(fileId)
+  })
+
+  ipcMain.handle('engine:translateBatch', async (_, blockIds: number[]) => {
+    return await translateBatchByBlockIds(blockIds)
+  })
+
+  ipcMain.handle('engine:startQueue', (_, options?: { fileId?: number }) => {
+    return startQueue(options)
+  })
+
+  ipcMain.handle('engine:stopQueue', () => {
+    return stopQueue()
   })
 }
