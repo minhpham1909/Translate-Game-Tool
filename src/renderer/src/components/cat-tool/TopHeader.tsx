@@ -1,9 +1,12 @@
 /**
  * TopHeader.tsx
- * Thanh header trên cùng: hiển thị breadcrumb file đang mở,
- * và các nút action chính (Pre-flight, Search, Settings, Export).
+ * Thanh header trên cùng: breadcrumb file, action buttons, theme toggle.
+ * Tất cả modals được mở từ đây thông qua callback props.
  */
-import { BarChart3, Search, Settings, Download, ChevronRight, Folder, Sun, Moon, Monitor } from 'lucide-react'
+import {
+  BarChart3, Search, Settings, Download, ChevronRight, Folder,
+  Sun, Moon, Monitor, ShieldAlert, Database, BookMarked, Keyboard,
+} from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useTheme } from '@renderer/context/ThemeContext'
@@ -14,19 +17,41 @@ interface TopHeaderProps {
   sourceLanguage?: string
   onSettingsClick: () => void
   onExportClick: () => void
+  onPreflightClick: () => void
+  onSearchClick: () => void
+  onQAClick: () => void
+  onGlossaryClick: () => void
+  onTMClick: () => void
+  onShortcutsClick: () => void
 }
 
 /**
  * TopHeader component
- * @param activeFileName - Tên file đang được chọn
- * @param sourceLanguage - Ngôn ngữ nguồn (ví dụ: 'english')
- * @param onSettingsClick - Callback mở Settings Modal
- * @param onExportClick - Callback trigger Export
+ * @param activeFileName - Tên file đang được chọn trong Sidebar
+ * @param sourceLanguage - Ngôn ngữ nguồn
+ * @param onSettingsClick - Mở Settings Modal
+ * @param onExportClick - Mở Export Modal
+ * @param onPreflightClick - Mở Pre-flight Modal
+ * @param onSearchClick - Mở Search & Replace Modal
+ * @param onQAClick - Mở QA Report Modal
+ * @param onGlossaryClick - Mở Glossary Manager Modal
+ * @param onTMClick - Mở TM Manager Modal
+ * @param onShortcutsClick - Mở Keyboard Shortcuts Modal
  */
-export function TopHeader({ activeFileName, sourceLanguage, onSettingsClick, onExportClick }: TopHeaderProps) {
+export function TopHeader({
+  activeFileName,
+  sourceLanguage,
+  onSettingsClick,
+  onExportClick,
+  onPreflightClick,
+  onSearchClick,
+  onQAClick,
+  onGlossaryClick,
+  onTMClick,
+  onShortcutsClick,
+}: TopHeaderProps) {
   const { theme, setTheme } = useTheme()
 
-  // Cycle: dark -> light -> system -> dark
   const cycleTheme = () => {
     if (theme === 'dark') setTheme('light')
     else if (theme === 'light') setTheme('system')
@@ -34,58 +59,106 @@ export function TopHeader({ activeFileName, sourceLanguage, onSettingsClick, onE
   }
 
   const themeIcon =
-    theme === 'dark' ? <Moon className="size-3.5" /> :
-    theme === 'light' ? <Sun className="size-3.5" /> :
-    <Monitor className="size-3.5" />
+    theme === 'dark'   ? <Moon className="size-3.5" /> :
+    theme === 'light'  ? <Sun className="size-3.5" />  :
+                         <Monitor className="size-3.5" />
 
   const themeLabel =
-    theme === 'dark' ? 'Dark mode' :
-    theme === 'light' ? 'Light mode' :
-    'System theme'
+    theme === 'dark'   ? 'Dark mode'   :
+    theme === 'light'  ? 'Light mode'  :
+                         'System theme'
 
   return (
     <header className="h-11 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-3">
       {/* Breadcrumbs */}
-      <nav className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Folder className="size-3.5" />
-        <span className="font-medium text-foreground">Project</span>
-        <ChevronRight className="size-3" />
-        <span>tl</span>
-        <ChevronRight className="size-3" />
-        <span>{sourceLanguage || 'english'}</span>
-        <ChevronRight className="size-3" />
-        <span className={cn('font-medium font-mono', activeFileName ? 'text-foreground' : 'text-muted-foreground')}>
+      <nav className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+        <Folder className="size-3.5 flex-shrink-0" />
+        <span className="font-medium text-foreground flex-shrink-0">Project</span>
+        <ChevronRight className="size-3 flex-shrink-0" />
+        <span className="flex-shrink-0">tl</span>
+        <ChevronRight className="size-3 flex-shrink-0" />
+        <span className="flex-shrink-0">{sourceLanguage || 'english'}</span>
+        <ChevronRight className="size-3 flex-shrink-0" />
+        <span className={cn(
+          'font-medium font-mono truncate',
+          activeFileName ? 'text-foreground' : 'text-muted-foreground'
+        )}>
           {activeFileName || 'Select a file'}
         </span>
       </nav>
 
       {/* Action Buttons */}
-      <div className="flex items-center gap-1.5">
-        <TooltipProvider delayDuration={0}>
+      <TooltipProvider delayDuration={0}>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+
+          {/* Pre-flight */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs gap-1.5">
+              <Button id="btn-open-preflight" variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1.5" onClick={onPreflightClick}>
                 <BarChart3 className="size-3.5" />
-                <span className="hidden lg:inline">Pre-flight</span>
+                <span className="hidden xl:inline">Pre-flight</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Phân tích trước khi dịch</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Phân tích & dịch hàng loạt</p></TooltipContent>
           </Tooltip>
 
+          {/* Search */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs gap-1.5">
+              <Button id="btn-open-search" variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1.5" onClick={onSearchClick}>
                 <Search className="size-3.5" />
-                <span className="hidden lg:inline">Search</span>
+                <span className="hidden xl:inline">Search</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Tìm kiếm toàn cục (Ctrl+F)</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Tìm & thay thế toàn project (Ctrl+F)</p></TooltipContent>
           </Tooltip>
+
+          {/* QA Report */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-qa" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onQAClick}>
+                <ShieldAlert className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>QA Report Dashboard</p></TooltipContent>
+          </Tooltip>
+
+          {/* Glossary */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-glossary" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onGlossaryClick}>
+                <BookMarked className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Glossary Manager</p></TooltipContent>
+          </Tooltip>
+
+          {/* TM Manager */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-tm" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onTMClick}>
+                <Database className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Translation Memory Manager</p></TooltipContent>
+          </Tooltip>
+
+          {/* Keyboard Shortcuts */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-shortcuts" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onShortcutsClick}>
+                <Keyboard className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Keyboard Shortcuts (F1)</p></TooltipContent>
+          </Tooltip>
+
+          <div className="w-px h-5 bg-border mx-1" />
 
           {/* Theme Toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={cycleTheme}>
+              <Button id="btn-toggle-theme" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={cycleTheme}>
                 {themeIcon}
                 <span className="sr-only">Toggle theme</span>
               </Button>
@@ -93,24 +166,25 @@ export function TopHeader({ activeFileName, sourceLanguage, onSettingsClick, onE
             <TooltipContent side="bottom"><p>{themeLabel}</p></TooltipContent>
           </Tooltip>
 
+          {/* Settings */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onSettingsClick}>
+              <Button id="btn-open-settings" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onSettingsClick}>
                 <Settings className="size-3.5" />
-                <span className="sr-only">Settings</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Cài đặt</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Cài đặt (Ctrl+,)</p></TooltipContent>
           </Tooltip>
-        </TooltipProvider>
 
-        <div className="w-px h-5 bg-border mx-1" />
+          <div className="w-px h-5 bg-border mx-1" />
 
-        <Button size="sm" className="h-7 px-3 text-xs gap-1.5" onClick={onExportClick}>
-          <Download className="size-3.5" />
-          Export
-        </Button>
-      </div>
+          {/* Export */}
+          <Button id="btn-open-export" size="sm" className="h-7 px-3 text-xs gap-1.5" onClick={onExportClick}>
+            <Download className="size-3.5" />
+            Export
+          </Button>
+        </div>
+      </TooltipProvider>
     </header>
   )
 }
