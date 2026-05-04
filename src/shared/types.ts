@@ -19,6 +19,7 @@ export interface GlossaryRecord {
   target_text: string;
   notes?: string;
   created_at?: string;
+  enabled?: boolean;
 }
 
 export interface FileRecord {

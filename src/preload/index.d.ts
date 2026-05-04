@@ -30,6 +30,7 @@ export interface GlossaryEntry {
   target_text: string
   notes?: string
   created_at?: string
+  enabled?: boolean
 }
 
 export type GlossaryEntryInput = Omit<GlossaryEntry, 'id' | 'created_at'>
@@ -131,6 +132,7 @@ declare global {
         add: (entry: GlossaryEntryInput) => Promise<GlossaryEntry>
         update: (id: number, entry: GlossaryEntryInput) => Promise<void>
         delete: (id: number) => Promise<void>
+        setEnabled: (ids: number[], enabled: boolean) => Promise<void>
       }
       tm: {
         getAll: () => Promise<TMEntry[]>

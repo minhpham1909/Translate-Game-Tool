@@ -1,6 +1,6 @@
 import { dialog, ipcMain } from 'electron'
 import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProjects } from './api/projectIpc'
-import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary } from './services/glossaryService'
+import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGlossaryEnabled } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
 import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation } from './services/workspaceService'
@@ -8,7 +8,7 @@ import { preFlightAnalyzer, startQueue, stopQueue, translateBatchByBlockIds } fr
 import { parseProjectDiff, previewDiff } from './services/parserService'
 import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
-import { getDatabase } from './store/database'
+import { getDatabase, rebuildFtsTable } from './store/database'
 import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
@@ -69,7 +69,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:testConnection', async () => {
     try {
-      await AIService.translateBatch(['ping'])
+      await AIService.testConnection()
       return { ok: true }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
@@ -96,6 +96,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('glossary:delete', (_, id: number) => {
     return deleteGlossary(id)
+  })
+
+  ipcMain.handle('glossary:setEnabled', (_, ids: number[], enabled: boolean) => {
+    return setGlossaryEnabled(ids, enabled)
   })
 
   // --- Translation Memory ---
@@ -134,7 +138,17 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('workspace:updateBlock', (_, blockId: number, text: string | null, status: string) => {
-    return updateBlockTranslation(blockId, text, status)
+    try {
+      return updateBlockTranslation(blockId, text, status)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message.includes('SQLITE_CORRUPT') || message.includes('database disk image is malformed')) {
+        console.warn('[IPC] FTS corruption detected, rebuilding and retrying...')
+        rebuildFtsTable()
+        return updateBlockTranslation(blockId, text, status)
+      }
+      throw err
+    }
   })
 
   ipcMain.handle('workspace:batchApprove', async (_, blockIds: number[]) => {
@@ -145,7 +159,18 @@ export function registerIpcHandlers(): void {
         stmt.run(id)
       }
     })
-    updateMany(blockIds)
+    try {
+      updateMany(blockIds)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message.includes('SQLITE_CORRUPT') || message.includes('database disk image is malformed')) {
+        console.warn('[IPC] FTS corruption detected, rebuilding and retrying...')
+        rebuildFtsTable()
+        updateMany(blockIds)
+      } else {
+        throw err
+      }
+    }
   })
 
   // --- Engine (AI Translation) ---
@@ -154,7 +179,17 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('engine:translateBatch', async (_, blockIds: number[]) => {
-    return await translateBatchByBlockIds(blockIds)
+    try {
+      return await translateBatchByBlockIds(blockIds)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message.includes('SQLITE_CORRUPT') || message.includes('database disk image is malformed')) {
+        console.warn('[IPC] FTS corruption detected, rebuilding and retrying...')
+        rebuildFtsTable()
+        return await translateBatchByBlockIds(blockIds)
+      }
+      throw err
+    }
   })
 
   ipcMain.handle('engine:startQueue', (_, options?: { fileId?: number }) => {

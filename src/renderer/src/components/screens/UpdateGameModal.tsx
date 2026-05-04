@@ -17,6 +17,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Label } from '@renderer/components/ui/label'
 import { Progress } from '@renderer/components/ui/progress'
 import { cn } from '@renderer/lib/utils'
+import { useNotification } from '@renderer/context/NotificationContext'
 
 type WizardStep = 1 | 2 | 3 | 4
 type ApplyStatus = 'idle' | 'applying' | 'success' | 'error'
@@ -65,6 +66,7 @@ export function UpdateGameModal({
   sourceLanguage,
   onComplete,
 }: UpdateGameModalProps): ReactElement {
+  const notify = useNotification()
   const [currentStep, setCurrentStep] = useState<WizardStep>(1)
   const [newGameFolderPath, setNewGameFolderPath] = useState('')
   const [preview, setPreview] = useState<DiffPreview | null>(null)
@@ -97,7 +99,7 @@ export function UpdateGameModal({
       setCurrentStep(3)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      alert(message || 'Failed to preview changes')
+      notify.error('Failed to preview changes', message || 'Unable to preview update diff.')
     }
   }
 

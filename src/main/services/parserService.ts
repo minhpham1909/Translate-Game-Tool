@@ -32,41 +32,14 @@ function resetWorkspaceTables(): void {
   db.exec('DELETE FROM translation_blocks;')
   db.exec('DELETE FROM files;')
 
+  // Clean up legacy FTS artifacts if they exist from old DB versions
   try {
-    db.exec("INSERT INTO blocks_fts(blocks_fts) VALUES('rebuild');")
-  } catch (err) {
-    console.warn('[ParserService] Rebuilding FTS table due to error:', err)
+    db.exec('DROP TABLE IF EXISTS blocks_fts;')
     db.exec('DROP TRIGGER IF EXISTS tbl_ai_after_insert;')
     db.exec('DROP TRIGGER IF EXISTS tbl_ai_after_update;')
     db.exec('DROP TRIGGER IF EXISTS tbl_ai_after_delete;')
-    db.exec('DROP TABLE IF EXISTS blocks_fts;')
-    db.exec(`
-      CREATE VIRTUAL TABLE blocks_fts USING fts5(
-        original_text,
-        translated_text,
-        content='translation_blocks',
-        content_rowid='id'
-      );
-    `)
-    db.exec(`
-      CREATE TRIGGER tbl_ai_after_insert AFTER INSERT ON translation_blocks BEGIN
-        INSERT INTO blocks_fts(rowid, original_text, translated_text)
-        VALUES (new.id, new.original_text, new.translated_text);
-      END;
-    `)
-    db.exec(`
-      CREATE TRIGGER tbl_ai_after_update AFTER UPDATE ON translation_blocks BEGIN
-        UPDATE blocks_fts
-        SET original_text = new.original_text, translated_text = new.translated_text
-        WHERE rowid = old.id;
-      END;
-    `)
-    db.exec(`
-      CREATE TRIGGER tbl_ai_after_delete AFTER DELETE ON translation_blocks BEGIN
-        INSERT INTO blocks_fts(blocks_fts, rowid, original_text, translated_text)
-        VALUES('delete', old.id, old.original_text, old.translated_text);
-      END;
-    `)
+  } catch (err) {
+    console.error('[ParserService] Error cleaning up legacy FTS:', err)
   }
 }
 

@@ -17,6 +17,7 @@ import { Switch } from '@renderer/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { useTheme } from '@renderer/context/ThemeContext'
+import { useNotification } from '@renderer/context/NotificationContext'
 import { cn } from '@renderer/lib/utils'
 import type { ActiveProviderId, AIProviderConfig, BlacklistPattern } from '../../../../shared/types'
 
@@ -43,6 +44,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const { theme, setTheme } = useTheme()
+  const notify = useNotification()
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai-api')
   const [showApiKey, setShowApiKey] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
@@ -51,9 +53,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   // Provider state
   const [providerId, setProviderId] = useState<ActiveProviderId>('gemini')
   const [providerConfigs, setProviderConfigs] = useState<Record<ActiveProviderId, AIProviderConfig>>({
-    gemini: { apiKey: '', baseURL: '', modelId: 'gemini-2.5-flash', customHeaders: {} },
-    openai_compatible: { apiKey: '', baseURL: 'https://api.openai.com/v1', modelId: 'gpt-4o', customHeaders: {} },
-    claude: { apiKey: '', baseURL: '', modelId: 'claude-sonnet-4-20250514', customHeaders: {} },
+    gemini: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+    openai_compatible: { apiKey: '', baseURL: 'https://api.openai.com/v1', modelId: '', customHeaders: {} },
+    claude: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
   })
 
   // Quick-access refs to current provider config
@@ -190,9 +192,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       })
       const result = await window.api.settings.testConnection()
       if (result.ok) {
-        alert('Connection OK')
+        notify.success('Connection OK', 'Provider is reachable and API key is valid.')
       } else {
-        alert(result.error || 'Connection failed')
+        notify.error('Connection failed', result.error || 'Unable to reach the provider.')
       }
     } finally {
       setIsTesting(false)

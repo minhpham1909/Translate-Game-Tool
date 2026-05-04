@@ -97,6 +97,7 @@ function ToastItem({ notification, onDismiss }: { notification: Notification; on
 
           {/* Close button */}
           <button
+            type="button"
             onClick={onDismiss}
             className="flex-shrink-0 p-0.5 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground transition-all"
           >

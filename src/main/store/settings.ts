@@ -25,19 +25,19 @@ const defaultSettings: AppSettings = {
     gemini: {
       apiKey: '',
       baseURL: '',
-      modelId: 'gemini-2.5-flash',
+      modelId: '',
       customHeaders: {},
     },
     openai_compatible: {
       apiKey: '',
       baseURL: 'https://api.openai.com/v1',
-      modelId: 'gpt-4o',
+      modelId: '',
       customHeaders: {},
     },
     claude: {
       apiKey: '',
       baseURL: '',
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: '',
       customHeaders: {},
     },
   },

@@ -1,4 +1,5 @@
 # PHASE 5 IMPLEMENTATION SUMMARY
+
 # Archive Unpacking & Contextual Translation Engine
 
 > **Status:** ✅ COMPLETE (All 46 tasks implemented, build passing)
@@ -10,6 +11,7 @@
 ## 1. OVERVIEW
 
 Phase 5 upgrades the VN Translation Tool MVP to handle:
+
 - **Compiled games** (.rpa archives, .rpyc scripts) via Python bridge
 - **Context-aware translation** — previous blocks injected as conversation history
 - **Multi-select workflow** — group blocks for batch translation by conversation flow
@@ -27,16 +29,19 @@ Phase 5 upgrades the VN Translation Tool MVP to handle:
 **Solution:** Python sidecar process extracts .rpa archives and decompiles .rpyc → .rpy.
 
 **Files Created:**
+
 - `src/main/python-tools/unpacker.py` — Full RPA-3.x extractor (with XOR decryption) + RPyc decompiler (tries unrpyc, falls back to pickle-based string extraction). Outputs JSON-line events for progress streaming.
 - `src/main/services/unpackerService.ts` — Scans for compiled files, finds Python on system, spawns unpacker, streams progress. Includes `installUnpackerDeps()` to auto-install unrpyc via pip.
 - `src/main/utils/unpackBroadcast.ts` — IPC event broadcaster for unpack progress.
 
 **Files Modified:**
+
 - `src/main/ipcHandler.ts` — 3 new handlers: `project:scanCompiled`, `project:unpackGame`, `project:installUnpackerDeps`
 - `src/preload/index.ts` + `index.d.ts` — CompiledScanResult, UnpackResult, UnpackProgressEvent types + 3 project methods + onUnpackProgress event
 - `src/renderer/src/components/screens/SetupWizardModal.tsx` — After folder selection, auto-scans for compiled files. Shows amber warning + "Unpack Game First" button when .rpa/.rpyc found but no .rpy source.
 
 **Python Dependencies (user installs via pip):**
+
 ```
 pip install unrpyc
 ```
@@ -49,6 +54,7 @@ pip install unrpyc
 **Solution:** Inject N previous translated blocks as read-only conversation context.
 
 **Files Modified:**
+
 - `src/main/api/aiService.ts` — `translateBatch()` accepts `ContextBlock[]`, injects into system prompt
 - `src/main/api/translators/OpenAICompatibleTranslator.ts` — `buildSystemPrompt()` accepts context, adds "PREVIOUS CONVERSATION CONTEXT" section
 - `src/main/api/translators/GeminiTranslator.ts` — context parameter added
@@ -56,6 +62,7 @@ pip install unrpyc
 - `src/main/services/translationEngine.ts` — `getContextBlocks()` queries DB for previous blocks by file_id + line_index before calling AI
 
 **Context Injection Format:**
+
 ```
 PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 - [Arthur]: "Hi Mary." → "Chào Mary."
@@ -72,9 +79,11 @@ PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 **Solution:** Checkboxes on cards, shift-click range select, floating action bar.
 
 **Files Created:**
+
 - `src/renderer/src/components/cat-tool/FloatingActionBar.tsx` — Bottom bar with "AI Translate", "Approve", "Clear" buttons
 
 **Files Modified:**
+
 - `src/renderer/src/components/cat-tool/TranslationCard.tsx` — Checkbox in header, isSelected prop, onSelect callback
 - `src/renderer/src/components/cat-tool/TranslationWorkspace.tsx` — Set<number> selection state, shift-click range, modified filter tab, FloatingActionBar integration
 - `src/renderer/src/App.tsx` — handleBatchTranslate, handleBatchApprove, workspace:batchApprove IPC
@@ -89,9 +98,11 @@ PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 **Solution:** Match original_text against regex patterns before AI/TM → auto-approve and skip.
 
 **Files Created:**
+
 - `src/main/utils/regexBlacklist.ts` — `filterBlacklist(texts, patterns)` returns {translatable, skipped}
 
 **Files Modified:**
+
 - `src/main/services/translationEngine.ts` — Both `translateBatchByBlockIds()` and `startBackgroundQueue()` filter via `filterBlacklist()` before calling AI
 - `src/main/parser/rpyParser.ts` — Parser-level `isSystemBlock()` filter for [Image 1], [CG 2], [BG] placeholders (hard filter at parse time)
 - `src/renderer/src/components/cat-tool/SettingsModal.tsx` — "Text Filter" tab with toggle + pattern management UI
@@ -107,15 +118,18 @@ PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 **Solution:** Progressive retry with error feedback. Glossary verification as gatekeeper.
 
 **Files Created:**
+
 - `src/main/utils/selfCorrection.ts` — `shouldRetry(errors)` categorizes errors, `buildSelfCorrectionPrompt()` builds retry message with increasing strictness
 - `src/main/utils/smartGlossary.ts` — `filterSmartGlossary(terms, texts)` only returns glossary entries relevant to current batch
 
 **Files Modified:**
+
 - `src/main/utils/qaLinter.ts` — Added `validateGlossary()` and `validateLengthOverflow()` to linter pipeline
 - `src/main/services/translationEngine.ts` — Progressive retry loop: validates → categorizes → retries critical errors → saves with appropriate status
 - `src/renderer/src/components/cat-tool/SettingsModal.tsx` — Toggles for self-correction, strict glossary, smart glossary, max retry attempts (1-3)
 
 **Settings:**
+
 - `enableSelfCorrection` (default true)
 - `enableStrictGlossary` (default true)
 - `enableSmartGlossary` (default true)
@@ -129,9 +143,11 @@ PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 **Solution:** Diff-based import preserves translations, marks changed blocks for review.
 
 **Files Created:**
+
 - `src/renderer/src/components/screens/UpdateGameModal.tsx` — 4-step guided wizard: Instructions → Select new folder → Preview changes → Apply update
 
 **Files Modified:**
+
 - `src/shared/types.ts` — Added `'modified'` to BlockStatus union
 - `src/main/parser/rpyParser.ts` — `importRpyToDatabaseDiff()` compares old vs new blocks by hash
 - `src/main/services/parserService.ts` — `parseProjectDiff()` and `previewDiff()` functions
@@ -143,6 +159,7 @@ PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 - `src/renderer/src/App.tsx` — UpdateGameModal wired + onGameUpdateClick callback
 
 **Diff Logic:**
+
 | Scenario | Action |
 |----------|--------|
 | Hash + text match | Keep translation, status unchanged |
@@ -155,6 +172,7 @@ PREVIOUS CONVERSATION CONTEXT (REFERENCE ONLY, DO NOT TRANSLATE):
 ## 3. COMPLETE FILE INVENTORY
 
 ### New Files (12)
+
 ```
 src/main/utils/jsonParser.ts
 src/main/api/errors.ts
@@ -170,6 +188,7 @@ src/renderer/src/components/screens/UpdateGameModal.tsx
 ```
 
 ### Modified Files (20)
+
 ```
 src/shared/types.ts                          (BlockStatus 'modified', providers config, new settings)
 src/main/store/settings.ts                   (new provider config, contextWindowSize, all new defaults)

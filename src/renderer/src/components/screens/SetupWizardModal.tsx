@@ -16,6 +16,7 @@ import { Label } from '@renderer/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Progress } from '@renderer/components/ui/progress'
 import { cn } from '@renderer/lib/utils'
+import { useNotification } from '@renderer/context/NotificationContext'
 
 type WizardStep = 1 | 2 | 3
 type ParseStatus = 'idle' | 'parsing' | 'success' | 'error'
@@ -41,6 +42,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
  * @param onComplete - Callback nhận config hoàn chỉnh
  */
 export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizardModalProps): ReactElement {
+  const notify = useNotification()
   const [currentStep, setCurrentStep] = useState<WizardStep>(1)
   const [gameFolderPath, setGameFolderPath] = useState('')
   const [sourceLanguage, setSourceLanguage] = useState('')
@@ -153,14 +155,14 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
     try {
       const languages = await window.api.project.scanLanguages(gameFolderPath)
       if (languages.length === 0) {
-        alert('Không tìm thấy thư mục ngôn ngữ nào trong game/tl/')
+        notify.warning('Không tìm thấy ngôn ngữ', 'Không tìm thấy thư mục ngôn ngữ nào trong game/tl/.')
         return
       }
       setAvailableLanguages(languages)
       setCurrentStep(2)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      alert(message || 'Lỗi quét ngôn ngữ')
+      notify.error('Lỗi quét ngôn ngữ', message || 'Lỗi quét ngôn ngữ')
     }
   }
 

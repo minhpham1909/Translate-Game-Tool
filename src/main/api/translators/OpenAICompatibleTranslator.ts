@@ -124,6 +124,120 @@ ${userSystemPrompt}`
     return new APIError(`HTTP ${statusCode}: ${body}`, statusCode, body)
   }
 
+  private estimateMaxOutputTokens(texts: string[]): number {
+    if (texts.length === 0) return 256
+    const totalChars = texts.reduce((sum, text) => sum + text.length, 0)
+    const estimated = Math.ceil(totalChars / 3)
+    return Math.max(256, Math.min(4096, estimated))
+  }
+
+  private extractAffordableTokenLimit(body: string): number | null {
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string } }
+      const message = parsed?.error?.message || ''
+      const match = message.match(/can only afford\s+(\d+)/i)
+      if (match && match[1]) {
+        const value = Number(match[1])
+        return Number.isFinite(value) && value > 0 ? value : null
+      }
+    } catch {
+      // ignore JSON parse failures
+    }
+
+    const fallbackMatch = body.match(/can only afford\s+(\d+)/i)
+    if (fallbackMatch && fallbackMatch[1]) {
+      const value = Number(fallbackMatch[1])
+      return Number.isFinite(value) && value > 0 ? value : null
+    }
+
+    return null
+  }
+
+  private buildRequestBody(systemPrompt: string, userPrompt: string, maxTokens: number, temperature: number): string {
+    return JSON.stringify({
+      model: this.config.modelId,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature,
+      max_tokens: maxTokens
+    })
+  }
+
+  private tryExtractObjectValueArray(raw: string): string[] | null {
+    let text = raw.trim()
+    text = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*$/g, '').trim()
+
+    const firstBrace = text.indexOf('{')
+    const lastBrace = text.lastIndexOf('}')
+    if (firstBrace === -1 || lastBrace <= firstBrace) return null
+
+    const candidate = text.substring(firstBrace, lastBrace + 1)
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>
+      if (!parsed || typeof parsed !== 'object') return null
+
+      const values = Object.values(parsed)
+      const arrayValues = values.filter((v) => Array.isArray(v)) as unknown[][]
+      if (arrayValues.length === 1) {
+        const arr = arrayValues[0]
+        if (arr.every((item) => typeof item === 'string')) {
+          return arr as string[]
+        }
+      }
+
+      if (values.length === 1 && typeof values[0] === 'string') {
+        return [values[0] as string]
+      }
+
+      const knownKeys = ['translations', 'data', 'items', 'result', 'output']
+      for (const key of knownKeys) {
+        const value = (parsed as Record<string, unknown>)[key]
+        if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+          return value as string[]
+        }
+      }
+    } catch {
+      return null
+    }
+
+    return null
+  }
+
+  private tryExtractSingleKeyTranslation(raw: string, sourceText: string): string | null {
+    let text = raw.trim()
+    text = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*$/g, '').trim()
+
+    const firstBrace = text.indexOf('{')
+    const lastBrace = text.lastIndexOf('}')
+    if (firstBrace === -1 || lastBrace <= firstBrace) return null
+
+    const candidate = text.substring(firstBrace, lastBrace + 1)
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>
+      if (!parsed || typeof parsed !== 'object') return null
+
+      const keys = Object.keys(parsed)
+      if (keys.length !== 1) return null
+
+      const key = keys[0]
+      const value = parsed[key]
+
+      if (Array.isArray(value) && value.length === 0) {
+        return key !== sourceText ? key : null
+      }
+
+      if (value === '' || value === null) {
+        return key !== sourceText ? key : null
+      }
+    } catch {
+      return null
+    }
+
+    return null
+  }
+
   /**
    * Translate a batch of texts.
    *
@@ -147,32 +261,43 @@ ${userSystemPrompt}`
 
     const userPrompt = `Translate the following array of strings to ${settings.targetLanguage}:\n${JSON.stringify(texts)}`
 
-    const body = JSON.stringify({
-      model: this.config.modelId,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: settings.temperature,
-      response_format: { type: 'json_object' }
-    })
+    const requestedMaxTokens = this.estimateMaxOutputTokens(texts)
 
-    let response: Response
-    try {
-      response = await fetch(this.getEndpoint(), {
+    const sendRequest = async (maxTokens: number): Promise<Response> => {
+      const body = this.buildRequestBody(systemPrompt, userPrompt, maxTokens, settings.temperature)
+      return await fetch(this.getEndpoint(), {
         method: 'POST',
         headers: this.buildHeaders(),
         body,
       })
+    }
+
+    let response: Response
+    try {
+      response = await sendRequest(requestedMaxTokens)
     } catch (err) {
-      // Network error
       const message = err instanceof Error ? err.message : String(err)
       throw new APIError(`Network error: ${message}`)
     }
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '')
-      throw this.normalizeHttpError(response.status, errorBody, response.headers)
+      if (response.status === 402) {
+        const affordable = this.extractAffordableTokenLimit(errorBody)
+        if (affordable && affordable < requestedMaxTokens) {
+          const retryMaxTokens = Math.max(64, affordable)
+          const retryResponse = await sendRequest(retryMaxTokens)
+          if (!retryResponse.ok) {
+            const retryBody = await retryResponse.text().catch(() => '')
+            throw this.normalizeHttpError(retryResponse.status, retryBody, retryResponse.headers)
+          }
+          response = retryResponse
+        } else {
+          throw this.normalizeHttpError(response.status, errorBody, response.headers)
+        }
+      } else {
+        throw this.normalizeHttpError(response.status, errorBody, response.headers)
+      }
     }
 
     const data = await response.json().catch(() => null) as {
@@ -193,6 +318,18 @@ ${userSystemPrompt}`
       const translatedArray = extractJsonArray(content)
 
       if (translatedArray.length !== texts.length) {
+        if (texts.length === 1 && translatedArray.length > 0) {
+          return [translatedArray[0]]
+        }
+        const objectArray = this.tryExtractObjectValueArray(content)
+        if (objectArray) {
+          if (objectArray.length === texts.length) return objectArray
+          if (texts.length === 1 && objectArray.length > 0) return [objectArray[0]]
+        }
+        if (texts.length === 1) {
+          const singleKey = this.tryExtractSingleKeyTranslation(content, texts[0])
+          if (singleKey) return [singleKey]
+        }
         throw new ParsingError(
           `Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`,
           content
@@ -202,6 +339,15 @@ ${userSystemPrompt}`
       return translatedArray
     } catch (err) {
       if (err instanceof ParsingError || err instanceof JSONParsingError) {
+        const objectArray = this.tryExtractObjectValueArray(content)
+        if (objectArray) {
+          if (objectArray.length === texts.length) return objectArray
+          if (texts.length === 1 && objectArray.length > 0) return [objectArray[0]]
+        }
+        if (texts.length === 1) {
+          const singleKey = this.tryExtractSingleKeyTranslation(content, texts[0])
+          if (singleKey) return [singleKey]
+        }
         throw new ParsingError(err.message, content)
       }
       throw err

@@ -58,7 +58,7 @@ function updateFileStats(db: Db, fileId: number): void {
 
 function buildSmartGlossary(db: Db, batchTexts: string[], enabled: boolean): string {
   const glossaries = db
-    .prepare(`SELECT source_text, target_text FROM glossaries`)
+    .prepare(`SELECT source_text, target_text FROM glossaries WHERE enabled = 1`)
     .all() as { source_text: string; target_text: string }[]
 
   if (glossaries.length === 0) return ''
@@ -73,7 +73,7 @@ function buildSmartGlossary(db: Db, batchTexts: string[], enabled: boolean): str
 
 function getRelevantGlossary(db: Db, batchTexts: string[], smartEnabled: boolean): GlossaryTerm[] {
   const all = db
-    .prepare(`SELECT source_text, target_text FROM glossaries`)
+    .prepare(`SELECT source_text, target_text FROM glossaries WHERE enabled = 1`)
     .all() as GlossaryTerm[]
 
   if (all.length === 0) return []
@@ -731,17 +731,17 @@ export async function startBackgroundQueue(
           emitSystemLog('error', `[Queue] ${normalized.name} (attempt ${attempts}): ${message}`)
 
           if (normalized instanceof RateLimitError) {
-            const waitTime = normalized.retryAfterMs || Math.pow(2, attempts) * 1000
+            const waitTime = normalized.retryAfterMs || Math.min(5000, Math.pow(2, attempts) * 500)
             console.log(`[Queue] Rate limited. Waiting ${waitTime}ms...`)
             await delay(waitTime, signal)
           } else if (normalized instanceof TokenLimitError) {
             // Reduce batch size and retry
             effectiveBatchSize = Math.max(1, Math.floor(effectiveBatchSize / 2))
             emitSystemLog('warning', `[Queue] Token limit. Reducing batch size to ${effectiveBatchSize}`)
-            await delay(2000, signal)
+            await delay(800, signal)
           } else if (normalized instanceof ParsingError) {
             // Retry — might be a fluke with the model
-            await delay(1000, signal)
+            await delay(500, signal)
           } else if (normalized instanceof APIError && normalized.statusCode === 401) {
             // Auth error — fatal
             console.error('[Queue] Auth failed. Stopping queue.')

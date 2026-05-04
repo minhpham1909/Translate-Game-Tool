@@ -13,7 +13,7 @@ import { PreflightModal } from '@renderer/components/screens/PreflightModal'
 import { ExportModal } from '@renderer/components/screens/ExportModal'
 import { QAReportModal } from '@renderer/components/screens/QAReportModal'
 import { TMManagerModal } from '@renderer/components/screens/TMManagerModal'
-import { GlossaryModal } from '@renderer/components/screens/GlossaryModal'
+import { GlossaryModal, type GlossaryEntry as GlossaryModalEntry } from '@renderer/components/screens/GlossaryModal'
 import { SearchReplaceModal } from '@renderer/components/screens/SearchReplaceModal'
 import { KeyboardShortcutsModal } from '@renderer/components/screens/KeyboardShortcutsModal'
 import { UpdateGameModal } from '@renderer/components/screens/UpdateGameModal'
@@ -85,6 +85,7 @@ function CATWorkspace({
   const [preflightScope, setPreflightScope] = useState<'file' | 'project'>('file')
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [preflightData, setPreflightData] = useState({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
+  const [glossaryEntries, setGlossaryEntries] = useState<GlossaryModalEntry[]>([])
   const activeFileIdRef = useRef<number | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notify = useNotification()
@@ -309,6 +310,22 @@ function CATWorkspace({
     })()
   }, [modals.preflight, preflightScope, activeFileId])
 
+  useEffect(() => {
+    if (!modals.glossary) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const raw = await window.api.glossary.getAll()
+        if (!cancelled) setGlossaryEntries(transformGlossaryEntries(raw))
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('Failed to load glossaries:', message)
+        if (!cancelled) notify.error('Glossary load failed', message)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [modals.glossary])
+
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
@@ -343,6 +360,13 @@ function CATWorkspace({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  const transformGlossaryEntries = (entries: unknown[]): GlossaryModalEntry[] =>
+    entries
+      .filter((e): e is { id: number; source_text: string; target_text: string; notes?: string; enabled?: boolean } =>
+        typeof e === 'object' && e !== null && 'id' in e && (e as Record<string, unknown>).id != null
+      )
+      .map((e) => ({ id: e.id, source_text: e.source_text, target_text: e.target_text, notes: e.notes, enabled: e.enabled !== false }))
 
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground overflow-hidden">
@@ -434,10 +458,50 @@ function CATWorkspace({
       <GlossaryModal
         open={modals.glossary}
         onOpenChange={(o) => setModals((p) => ({ ...p, glossary: o }))}
-        entries={[]}
-        onAdd={(e) => console.log('[TODO] Add glossary:', e)}
-        onUpdate={(id, e) => console.log('[TODO] Update glossary:', id, e)}
-        onDelete={(id) => console.log('[TODO] Delete glossary:', id)}
+        entries={glossaryEntries}
+        onAdd={async (e) => {
+          try {
+            await window.api.glossary.add({ ...e, enabled: e.enabled !== false })
+            const raw = await window.api.glossary.getAll()
+            setGlossaryEntries(transformGlossaryEntries(raw))
+            notify.success('Term added', `${e.source_text} → ${e.target_text}`)
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err)
+            notify.error('Add failed', message)
+          }
+        }}
+        onUpdate={async (id, e) => {
+          try {
+            await window.api.glossary.update(id, { ...e, enabled: e.enabled !== false })
+            const raw = await window.api.glossary.getAll()
+            setGlossaryEntries(transformGlossaryEntries(raw))
+            notify.success('Term updated', e.source_text)
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err)
+            notify.error('Update failed', message)
+          }
+        }}
+        onDelete={async (id) => {
+          try {
+            await window.api.glossary.delete(id)
+            const raw = await window.api.glossary.getAll()
+            setGlossaryEntries(transformGlossaryEntries(raw))
+            notify.success('Term deleted', 'Removed from glossary')
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err)
+            notify.error('Delete failed', message)
+          }
+        }}
+        onSetEnabled={async (ids, enabled) => {
+          try {
+            await window.api.glossary.setEnabled(ids, enabled)
+            const raw = await window.api.glossary.getAll()
+            setGlossaryEntries(transformGlossaryEntries(raw))
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err)
+            notify.error('Toggle failed', message)
+          }
+        }}
       />
 
       <SearchReplaceModal

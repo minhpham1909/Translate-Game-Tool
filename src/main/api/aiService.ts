@@ -63,6 +63,36 @@ QUY TẮC KỸ THUẬT BẮT BUỘC (CRITICAL):
   return partA + partContext + partB
 }
 
+function estimateTokenCountFromChars(charCount: number): number {
+  if (charCount <= 0) return 0
+  return Math.max(1, Math.ceil(charCount / 4))
+}
+
+function estimateMaxOutputTokens(texts: string[]): number {
+  const totalChars = texts.reduce((sum, text) => sum + text.length, 0)
+  const estimated = Math.ceil(totalChars / 3)
+  return Math.max(256, Math.min(4096, estimated))
+}
+
+function buildPromptMetrics(texts: string[], glossaryText: string, contextHistory: ContextBlock[]) {
+  const inputChars = texts.reduce((sum, text) => sum + text.length, 0)
+  const glossaryChars = glossaryText.length
+  const contextChars = contextHistory.reduce(
+    (sum, block) => sum + block.original.length + block.translated.length + (block.character?.length || 0),
+    0
+  )
+  const approxTokens = estimateTokenCountFromChars(inputChars + glossaryChars + contextChars)
+  return { inputChars, glossaryChars, contextChars, approxTokens }
+}
+
+function isPromptTokenLimitError(error: unknown): boolean {
+  if (error instanceof APIError) {
+    const response = error.response || ''
+    return /prompt tokens limit exceeded/i.test(response) || /prompt tokens limit exceeded/i.test(error.message)
+  }
+  return false
+}
+
 // ============================================================================
 // GEMINI TRANSLATOR
 // ============================================================================
@@ -90,6 +120,7 @@ class GeminiTranslator {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
         temperature: settings.temperature,
+        maxOutputTokens: estimateMaxOutputTokens(texts),
       }
     })
 
@@ -144,7 +175,7 @@ class ClaudeTranslator {
         model: this.modelName,
         system: systemPrompt,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 4096,
+        max_tokens: estimateMaxOutputTokens(texts),
         temperature: settings.temperature
       })
     })
@@ -183,14 +214,29 @@ class ClaudeTranslator {
   }
 }
 
-// ============================================================================
-// MODEL DEFAULTS
-// ============================================================================
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000
+const modelListCache = new Map<string, { models: string[]; expiresAt: number }>()
 
-export const DEFAULT_MODELS: Record<string, string[]> = {
-  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
-  openai_compatible: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  claude: ['claude-sonnet-4-20250514', 'claude-opus-4-20250414', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+function getModelCacheKey(providerId: string, config: { apiKey?: string; baseURL?: string }): string {
+  const keyPart = config.apiKey ? config.apiKey.slice(0, 8) : 'no-key'
+  const basePart = config.baseURL ? config.baseURL.replace(/\/+$/, '') : ''
+  return `${providerId}|${basePart}|${keyPart}`
+}
+
+function getCachedModels(providerId: string, config: { apiKey?: string; baseURL?: string }): string[] | null {
+  const key = getModelCacheKey(providerId, config)
+  const cached = modelListCache.get(key)
+  if (!cached) return null
+  if (cached.expiresAt < Date.now()) {
+    modelListCache.delete(key)
+    return null
+  }
+  return cached.models
+}
+
+function setCachedModels(providerId: string, config: { apiKey?: string; baseURL?: string }, models: string[]): void {
+  const key = getModelCacheKey(providerId, config)
+  modelListCache.set(key, { models, expiresAt: Date.now() + MODEL_CACHE_TTL_MS })
 }
 
 // ============================================================================
@@ -198,6 +244,36 @@ export const DEFAULT_MODELS: Record<string, string[]> = {
 // ============================================================================
 
 export class AIService {
+  private static buildOpenAICompatibleHeaders(
+    config: { apiKey: string; customHeaders?: Record<string, string> }
+  ): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    }
+
+    if (config.customHeaders) {
+      for (const [key, value] of Object.entries(config.customHeaders)) {
+        headers[key] = value
+      }
+    }
+
+    return headers
+  }
+
+  private static async resolveModelId(
+    providerId: string,
+    config: { apiKey?: string; modelId?: string; baseURL?: string; customHeaders?: Record<string, string> }
+  ): Promise<string> {
+    const configured = (config.modelId || '').trim()
+    if (configured) return configured
+
+    const models = await AIService.listModels(providerId)
+    if (models.length > 0) return models[0]
+
+    throw new APIError(`No model available for provider: ${providerId.toUpperCase()}`)
+  }
+
   /**
    * Translate a batch of texts using the currently active provider.
    */
@@ -209,10 +285,7 @@ export class AIService {
       throw new APIError(`Missing API Key for provider: ${providerId.toUpperCase()}`)
     }
 
-    const modelId = config.modelId || DEFAULT_MODELS[providerId]?.[0] || ''
-    if (!modelId) {
-      throw new APIError(`No model configured for provider: ${providerId.toUpperCase()}`)
-    }
+    const modelId = await AIService.resolveModelId(providerId, config)
 
     let translator: { providerName: string; translate(texts: string[], settings: AppSettings, glossary: string, context: ContextBlock[]): Promise<string[]> }
 
@@ -239,6 +312,10 @@ export class AIService {
     }
 
     console.log(`[AI Service | ${translator.providerName}] Translating batch of ${texts.length} item(s)...`)
+    const metrics = buildPromptMetrics(texts, glossaryText, contextHistory)
+    console.log(
+      `[AI Service | ${translator.providerName}] Input chars=${metrics.inputChars}, glossary chars=${metrics.glossaryChars}, context chars=${metrics.contextChars}, approx tokens=${metrics.approxTokens}.`
+    )
     const startTime = Date.now()
 
     try {
@@ -247,6 +324,24 @@ export class AIService {
       console.log(`[AI Service | ${translator.providerName}] OK for ${texts.length} item(s) (${duration}ms).`)
       return result
     } catch (error) {
+      if (
+        providerId === 'openai_compatible' &&
+        isPromptTokenLimitError(error) &&
+        (contextHistory.length > 0 || glossaryText.length > 0 || settings.userCustomPrompt)
+      ) {
+        console.warn(`[AI Service | ${translator.providerName}] Prompt tokens limit exceeded. Retrying with trimmed prompt...`)
+        const trimmedSettings = { ...settings, userCustomPrompt: '' }
+        try {
+          const result = await translator.translate(texts, trimmedSettings, '', [])
+          const duration = Date.now() - startTime
+          console.log(`[AI Service | ${translator.providerName}] OK for ${texts.length} item(s) after trim (${duration}ms).`)
+          return result
+        } catch (retryError) {
+          console.error(`[AI Service | ${translator.providerName}] Trim retry failed:`, retryError)
+          throw retryError
+        }
+      }
+
       console.error(`[AI Service | ${translator.providerName}] Error:`, error)
       throw error
     }
@@ -269,7 +364,7 @@ export class AIService {
       throw new APIError(`Missing API Key for provider: ${providerId.toUpperCase()}`)
     }
 
-    const modelId = config.modelId || DEFAULT_MODELS[providerId]?.[0] || ''
+    const modelId = await AIService.resolveModelId(providerId, config)
 
     // Build self-correction prompt with original texts, bad translations, and errors
     const correctionPrompt = `You are fixing a translation from English to ${settings.targetLanguage}.
@@ -298,6 +393,7 @@ ${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
             responseMimeType: 'application/json',
             responseSchema,
             temperature: Math.max(0, settings.temperature - 0.1 * (attempt + 1)),
+            maxOutputTokens: estimateMaxOutputTokens(texts),
           }
         })
         const result = await model.generateContent(`Translate these to ${settings.targetLanguage}:\n${JSON.stringify(texts)}`)
@@ -333,16 +429,19 @@ ${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
     const config = settings.providers[activeProvider as keyof typeof settings.providers]
     const apiKey = config?.apiKey || ''
 
-    const defaults = DEFAULT_MODELS[activeProvider] || DEFAULT_MODELS['gemini']
+    const fallback = (config?.modelId || '').trim() ? [config.modelId] : []
 
-    if (!apiKey) return defaults
+    if (!apiKey) return fallback
+
+    const cached = getCachedModels(activeProvider, { apiKey, baseURL: config?.baseURL })
+    if (cached) return cached
 
     if (activeProvider === 'gemini') {
       try {
         const url = new URL('https://generativelanguage.googleapis.com/v1beta/models')
         url.searchParams.set('key', apiKey)
         const response = await fetch(url.toString())
-        if (!response.ok) return defaults
+        if (!response.ok) return fallback
 
         const data = await response.json() as {
           models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
@@ -353,9 +452,11 @@ ${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
           .map((m) => (m.name || '').replace('models/', ''))
           .filter((n) => n.length > 0)
 
-        return remoteModels.length > 0 ? remoteModels : defaults
+        const finalModels = remoteModels.length > 0 ? remoteModels : fallback
+        if (finalModels.length > 0) setCachedModels(activeProvider, { apiKey, baseURL: config?.baseURL }, finalModels)
+        return finalModels
       } catch {
-        return defaults
+        return fallback
       }
     }
 
@@ -363,36 +464,119 @@ ${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
       const base = (config?.baseURL || 'https://api.openai.com/v1').replace(/\/+$/, '')
       try {
         const response = await fetch(`${base}/models`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
+          headers: AIService.buildOpenAICompatibleHeaders({ apiKey, customHeaders: config?.customHeaders })
         })
-        if (!response.ok) return defaults
+        if (!response.ok) return fallback
         const data = await response.json()
-        const remoteModels = (data.data || []).map((m: { id: string }) => m.id)
-        return remoteModels.length > 0 ? remoteModels : defaults
+        const raw = Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : [])
+        const remoteModels = raw
+          .map((m: { id?: string; name?: string }) => m.id || m.name || '')
+          .filter((id: string) => id.length > 0)
+        const finalModels = remoteModels.length > 0 ? remoteModels : fallback
+        if (finalModels.length > 0) setCachedModels(activeProvider, { apiKey, baseURL: config?.baseURL }, finalModels)
+        return finalModels
       } catch {
-        return defaults
+        return fallback
       }
     }
 
     if (activeProvider === 'claude') {
       try {
-        const response = await fetch('https://api.anthropic.com/v1/models', {
+        const base = (config?.baseURL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')
+        const response = await fetch(`${base}/models`, {
           headers: {
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01'
           }
         })
-        if (!response.ok) return defaults
+        if (!response.ok) return fallback
         const data = await response.json()
         const remoteModels = (data.data || [])
           .map((m: { id: string }) => m.id)
           .filter((id: string) => id.includes('claude'))
-        return remoteModels.length > 0 ? remoteModels : defaults
+        const finalModels = remoteModels.length > 0 ? remoteModels : fallback
+        if (finalModels.length > 0) setCachedModels(activeProvider, { apiKey, baseURL: config?.baseURL }, finalModels)
+        return finalModels
       } catch {
-        return defaults
+        return fallback
       }
     }
 
-    return defaults
+    return fallback
+  }
+
+  /**
+   * Test provider connectivity without running a full translation.
+   */
+  static async testConnection(providerOverride?: string): Promise<void> {
+    const settings = getSettings()
+    const providerId = (providerOverride || settings.activeProviderId || 'gemini').toLowerCase()
+    const config = settings.providers[providerId as keyof typeof settings.providers]
+    const apiKey = config?.apiKey || ''
+
+    if (!apiKey) {
+      throw new APIError(`Missing API Key for provider: ${providerId.toUpperCase()}`)
+    }
+
+    if (providerId === 'gemini') {
+      const url = new URL('https://generativelanguage.googleapis.com/v1beta/models')
+      url.searchParams.set('key', apiKey)
+      const response = await fetch(url.toString())
+      if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        throw new APIError(`Gemini connection failed (${response.status}): ${body}`, response.status, body)
+      }
+      return
+    }
+
+    if (providerId === 'openai_compatible') {
+      const base = (config?.baseURL || 'https://api.openai.com/v1').replace(/\/+$/, '')
+      const headers = AIService.buildOpenAICompatibleHeaders({ apiKey, customHeaders: config?.customHeaders })
+      const modelId = (config?.modelId || '').trim()
+
+      const response = await fetch(`${base}/models`, { headers })
+      if (response.ok) return
+
+      if (response.status === 404 || response.status === 405 || response.status === 501) {
+        if (!modelId) {
+          throw new APIError('Model ID is required for test connection when /models is unavailable')
+        }
+        const fallback = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 1,
+            temperature: 0,
+          })
+        })
+        if (!fallback.ok) {
+          const body = await fallback.text().catch(() => '')
+          throw new APIError(`Connection failed (${fallback.status}): ${body}`, fallback.status, body)
+        }
+        return
+      }
+
+      const body = await response.text().catch(() => '')
+      throw new APIError(`Connection failed (${response.status}): ${body}`, response.status, body)
+    }
+
+    if (providerId === 'claude') {
+      const base = (config?.baseURL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')
+      const response = await fetch(`${base}/models`, {
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        }
+      })
+      if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        throw new APIError(`Claude connection failed (${response.status}): ${body}`, response.status, body)
+      }
+      return
+    }
+
+    throw new APIError(`Unsupported provider: ${providerId}`)
   }
 }

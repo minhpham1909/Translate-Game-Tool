@@ -10,6 +10,7 @@ interface GlossaryEntry {
   target_text: string
   notes?: string
   created_at?: string
+  enabled?: boolean
 }
 
 type GlossaryEntryInput = Omit<GlossaryEntry, 'id' | 'created_at'>
@@ -129,6 +130,7 @@ interface RendererApi {
     add: (entry: GlossaryEntryInput) => Promise<GlossaryEntry>
     update: (id: number, entry: GlossaryEntryInput) => Promise<void>
     delete: (id: number) => Promise<void>
+    setEnabled: (ids: number[], enabled: boolean) => Promise<void>
   }
   tm: {
     getAll: () => Promise<TMEntry[]>
@@ -192,7 +194,8 @@ const api: RendererApi = {
     getAll: () => ipcRenderer.invoke('glossary:getAll') as Promise<GlossaryEntry[]>,
     add: (entry: GlossaryEntryInput) => ipcRenderer.invoke('glossary:add', entry) as Promise<GlossaryEntry>,
     update: (id: number, entry: GlossaryEntryInput) => ipcRenderer.invoke('glossary:update', id, entry) as Promise<void>,
-    delete: (id: number) => ipcRenderer.invoke('glossary:delete', id) as Promise<void>
+    delete: (id: number) => ipcRenderer.invoke('glossary:delete', id) as Promise<void>,
+    setEnabled: (ids: number[], enabled: boolean) => ipcRenderer.invoke('glossary:setEnabled', ids, enabled) as Promise<void>
   },
   tm: {
     getAll: () => ipcRenderer.invoke('tm:getAll') as Promise<TMEntry[]>,

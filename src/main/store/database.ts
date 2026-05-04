@@ -24,6 +24,12 @@ export function initDatabase(): Database.Database {
   console.log(`[System] userData: ${userDataPath}`)
   console.log(`[System] dbPath: ${dbPath}`)
 
+  // Clean up stale WAL/SHM files if main DB is missing (prevents corruption on fresh start)
+  if (!fs.existsSync(dbPath)) {
+    fs.removeSync(dbPath + '-wal')
+    fs.removeSync(dbPath + '-shm')
+  }
+
   // Khởi tạo DB
   db = new Database(dbPath, {
     // Uncomment dòng dưới nếu muốn debug log query ra console
@@ -34,6 +40,22 @@ export function initDatabase(): Database.Database {
   db.pragma('journal_mode = WAL')
   // Bật Foreign Keys
   db.pragma('foreign_keys = ON')
+  // Tăng cache để giảm I/O
+  db.pragma('cache_size = -4000') // 4MB cache
+  // Bật integrity check on every write
+  db.pragma('synchronous = NORMAL')
+
+  // Check integrity on startup
+  try {
+    const integrity = db.pragma('integrity_check', { simple: true }) as string
+    if (integrity !== 'ok') {
+      console.warn('[Database] Integrity check failed:', integrity)
+      // Try to recover by vacuuming
+      db.exec('VACUUM')
+    }
+  } catch (err) {
+    console.error('[Database] Integrity check error:', err)
+  }
 
   // Thiết lập Schema
   setupSchema(db)
@@ -93,46 +115,14 @@ function setupSchema(db: Database.Database): void {
       );
     `)
 
-    // 4. Bảng ảo blocks_fts: Phục vụ tính năng Full-Text Search
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS blocks_fts USING fts5(
-        original_text,
-        translated_text,
-        content='translation_blocks',
-        content_rowid='id'
-      );
-    `)
-
-    // 5. Triggers: Tự động đồng bộ từ translation_blocks sang blocks_fts
-    db.exec(`
-      CREATE TRIGGER IF NOT EXISTS tbl_ai_after_insert AFTER INSERT ON translation_blocks BEGIN
-        INSERT INTO blocks_fts(rowid, original_text, translated_text)
-        VALUES (new.id, new.original_text, new.translated_text);
-      END;
-    `)
-
-    db.exec(`
-      CREATE TRIGGER IF NOT EXISTS tbl_ai_after_update AFTER UPDATE ON translation_blocks BEGIN
-        UPDATE blocks_fts
-        SET original_text = new.original_text, translated_text = new.translated_text
-        WHERE rowid = old.id;
-      END;
-    `)
-
-    db.exec(`
-      CREATE TRIGGER IF NOT EXISTS tbl_ai_after_delete AFTER DELETE ON translation_blocks BEGIN
-        INSERT INTO blocks_fts(blocks_fts, rowid, original_text, translated_text)
-        VALUES('delete', old.id, old.original_text, old.translated_text);
-      END;
-    `)
-
-    // 6. Bảng glossaries: Quản lý từ điển thuật ngữ
+    // 5. Bảng glossaries: Quản lý từ điển thuật ngữ
     db.exec(`
       CREATE TABLE IF NOT EXISTS glossaries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         source_text TEXT UNIQUE NOT NULL,
         target_text TEXT NOT NULL,
         notes TEXT,
+        enabled INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `)
@@ -143,10 +133,36 @@ function setupSchema(db: Database.Database): void {
     if (!hasTranslatedBy) {
       db.exec(`ALTER TABLE translation_blocks ADD COLUMN translated_by TEXT DEFAULT 'none';`);
     }
+
+    const glossaryInfo = db.prepare(`PRAGMA table_info(glossaries);`).all() as any[];
+    const hasGlossaryEnabled = glossaryInfo.some(col => col.name === 'enabled');
+    if (!hasGlossaryEnabled) {
+      db.exec(`ALTER TABLE glossaries ADD COLUMN enabled INTEGER DEFAULT 1;`);
+      db.exec(`UPDATE glossaries SET enabled = 1 WHERE enabled IS NULL;`);
+    }
   })
 
   // Thực thi Transaction
   initTransaction()
+}
+
+/**
+ * FTS5 virtual table has been removed to avoid corruption issues.
+ * Search functionality now uses LIKE/GLOB queries on translation_blocks directly.
+ * This function is kept for backward compatibility with IPC handlers.
+ */
+export function rebuildFtsTable(): void {
+  // No-op: FTS table removed. If old DB has blocks_fts, clean it up.
+  if (!db) return
+  try {
+    db.exec('DROP TABLE IF EXISTS blocks_fts;')
+    db.exec('DROP TRIGGER IF EXISTS tbl_ai_after_insert;')
+    db.exec('DROP TRIGGER IF EXISTS tbl_ai_after_update;')
+    db.exec('DROP TRIGGER IF EXISTS tbl_ai_after_delete;')
+    console.log('[Database] Cleaned up legacy FTS artifacts.')
+  } catch (err) {
+    console.error('[Database] Error cleaning up FTS artifacts:', err)
+  }
 }
 
 /**
