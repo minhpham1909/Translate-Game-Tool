@@ -7,13 +7,15 @@
 import { useState } from 'react'
 import {
   Plus, Search, FileText, CheckCircle2, AlertTriangle,
-  Circle, ChevronRight, ChevronDown, FolderOpen
+  Circle, ChevronRight, ChevronDown, FolderOpen, Clock
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Progress } from '@renderer/components/ui/progress'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { cn } from '@renderer/lib/utils'
+import type { RecentProject } from '../../../../shared/types'
 
 export type FileStatus = 'completed' | 'in_progress' | 'pending' | 'warning'
 
@@ -32,6 +34,9 @@ interface LeftSidebarProps {
   sourceLanguage: string
   onFileSelect: (fileId: number) => void
   onNewProject: () => void
+  onChangeLocation: () => void
+  recentProjects: RecentProject[]
+  onOpenProject: (project: RecentProject) => void
 }
 
 const statusIcons: Record<FileStatus, React.ReactNode> = {
@@ -56,9 +61,19 @@ const progressColors: Record<FileStatus, string> = {
  * @param onFileSelect - Callback khi chọn file
  * @param onNewProject - Callback mở Setup Wizard
  */
-export function LeftSidebar({ files, activeFileId, sourceLanguage, onFileSelect, onNewProject }: LeftSidebarProps) {
+export function LeftSidebar({
+  files,
+  activeFileId,
+  sourceLanguage,
+  onFileSelect,
+  onNewProject,
+  onChangeLocation,
+  recentProjects,
+  onOpenProject,
+}: LeftSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [isExpanded, setIsExpanded] = useState(true)
+  const [selectedRecent, setSelectedRecent] = useState('')
 
   const filteredFiles = files.filter((file) =>
     file.file_name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -68,22 +83,18 @@ export function LeftSidebar({ files, activeFileId, sourceLanguage, onFileSelect,
     ? Math.round(files.reduce((acc, f) => acc + (f.translated_blocks / Math.max(f.total_blocks, 1)), 0) / files.length * 100)
     : 0
 
+  const handleRecentSelect = (value: string): void => {
+    const project = recentProjects.find((p) => p.gameFolderPath === value)
+    if (project) {
+      onOpenProject(project)
+      setSelectedRecent('')
+      return
+    }
+    setSelectedRecent(value)
+  }
+
   return (
     <aside className="w-[270px] flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
-      {/* New Project Button */}
-      <div className="p-3 border-b border-sidebar-border">
-        <Button
-          id="btn-new-project"
-          variant="outline"
-          size="sm"
-          className="w-full justify-start gap-2 h-8 text-xs"
-          onClick={onNewProject}
-        >
-          <Plus className="size-3.5" />
-          New Project
-        </Button>
-      </div>
-
       {/* Search Input */}
       <div className="p-3 border-b border-sidebar-border">
         <div className="relative">
@@ -113,6 +124,47 @@ export function LeftSidebar({ files, activeFileId, sourceLanguage, onFileSelect,
             <FolderOpen className="size-3.5 text-warning" />
             <span>tl / {sourceLanguage}</span>
           </button>
+
+          {/* Project Helper Bar */}
+          <div className="mt-2 px-2 flex items-center gap-1">
+            <Button
+              id="btn-project-new"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[10px] gap-1.5"
+              onClick={onNewProject}
+            >
+              <Plus className="size-3" />
+              New
+            </Button>
+            <Button
+              id="btn-project-change-location"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[10px] gap-1.5"
+              onClick={onChangeLocation}
+            >
+              <FolderOpen className="size-3" />
+              Change
+            </Button>
+            <Select value={selectedRecent} onValueChange={handleRecentSelect}>
+              <SelectTrigger
+                id="select-recent-project"
+                className="h-6 text-[10px] px-2 gap-1.5 bg-sidebar"
+                disabled={recentProjects.length === 0}
+              >
+                <Clock className="size-3" />
+                <SelectValue placeholder="Recent" />
+              </SelectTrigger>
+              <SelectContent>
+                {recentProjects.map((project) => (
+                  <SelectItem key={project.gameFolderPath} value={project.gameFolderPath}>
+                    {project.sourceLanguage} → {project.targetLanguage} · {project.gameFolderPath}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* File List */}
           {isExpanded && (

@@ -1,8 +1,9 @@
 import path from 'path'
 import fs from 'fs-extra'
-import { getProjectConfig, saveProjectConfig } from '../store/settings'
-import { ProjectConfig } from '../../shared/types'
+import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProjects, saveProjectConfig } from '../store/settings'
+import { ProjectConfig, RecentProject } from '../../shared/types'
 import { parseProject } from '../services/parserService'
+import { initDatabase } from '../store/database'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -11,7 +12,7 @@ import { parseProject } from '../services/parserService'
  */
 export async function scanAvailableLanguages(gameFolderPath: string): Promise<string[]> {
   const tlPath = path.join(gameFolderPath, 'tl')
-  
+
   try {
     const exists = await fs.pathExists(tlPath)
     if (!exists) {
@@ -26,8 +27,8 @@ export async function scanAvailableLanguages(gameFolderPath: string): Promise<st
 
     return languages
   } catch (error) {
-    console.error(`[ProjectSetup] Lỗi quét ngôn ngữ trong ${tlPath}:`, error)
-    throw new Error('Không thể đọc thư mục ngôn ngữ của game.')
+    console.error(`[ProjectSetup] Failed to scan languages in ${tlPath}:`, error)
+    throw new Error('Failed to read game language folder.')
   }
 }
 
@@ -37,19 +38,23 @@ export async function scanAvailableLanguages(gameFolderPath: string): Promise<st
 export async function setupProject(config: ProjectConfig): Promise<void> {
   // Validate cơ bản
   if (!config.gameFolderPath || !config.sourceLanguage || !config.targetLanguage) {
-    throw new Error('Thiếu thông tin Project Config.')
+    throw new Error('Missing Project Config fields.')
   }
-  
+
   if (config.sourceLanguage === config.targetLanguage) {
-    throw new Error('Ngôn ngữ đích phải khác ngôn ngữ nguồn.')
+    throw new Error('Target language must differ from source language.')
   }
+
+  // Đảm bảo DB được khởi tạo trước khi parse
+  initDatabase()
 
   // Chạy parser quét file và nạp vào SQLite
   await parseProject(config.gameFolderPath, config.sourceLanguage)
 
   // Lưu cấu hình vào electron-store sau khi parse thành công
   saveProjectConfig(config)
-  console.log('[ProjectSetup] Đã lưu cấu hình Project:', config)
+  addRecentProject(config)
+  console.log('[ProjectSetup] Project config saved:', config)
 }
 
 /**
@@ -57,4 +62,11 @@ export async function setupProject(config: ProjectConfig): Promise<void> {
  */
 export function getCurrentProject(): ProjectConfig | null {
   return getProjectConfig()
+}
+
+/**
+ * Lấy danh sách recent projects
+ */
+export function getRecentProjects(): RecentProject[] {
+  return readRecentProjects()
 }

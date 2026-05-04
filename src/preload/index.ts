@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { ProjectConfig } from '../shared/types'
+import type { AppSettings, ProjectConfig, RecentProject } from '../shared/types'
 
 type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning'
 
@@ -76,6 +76,8 @@ interface RendererApi {
     scanLanguages: (gamePath: string) => Promise<string[]>
     setup: (config: ProjectConfig) => Promise<void>
     getCurrent: () => Promise<ProjectConfig | null>
+    selectFolder: () => Promise<string | null>
+    getRecent: () => Promise<RecentProject[]>
   }
   glossary: {
     getAll: () => Promise<GlossaryEntry[]>
@@ -108,6 +110,12 @@ interface RendererApi {
     onSystemLog: (callback: (entry: SystemLogEntry) => void) => () => void
     onEngineProgress: (callback: (progress: EngineProgress) => void) => () => void
   }
+  settings: {
+    get: () => Promise<AppSettings>
+    save: (settings: Partial<AppSettings>) => Promise<void>
+    testConnection: () => Promise<{ ok: boolean; error?: string }>
+    listModels: (provider?: string) => Promise<string[]>
+  }
 }
 
 // Custom APIs for renderer
@@ -115,7 +123,9 @@ const api: RendererApi = {
   project: {
     scanLanguages: (gamePath: string) => ipcRenderer.invoke('project:scanLanguages', gamePath),
     setup: (config: ProjectConfig) => ipcRenderer.invoke('project:setup', config) as Promise<void>,
-    getCurrent: () => ipcRenderer.invoke('project:getCurrent') as Promise<ProjectConfig | null>
+    getCurrent: () => ipcRenderer.invoke('project:getCurrent') as Promise<ProjectConfig | null>,
+    selectFolder: () => ipcRenderer.invoke('project:selectFolder') as Promise<string | null>,
+    getRecent: () => ipcRenderer.invoke('project:getRecent') as Promise<RecentProject[]>
   },
   glossary: {
     getAll: () => ipcRenderer.invoke('glossary:getAll') as Promise<GlossaryEntry[]>,
@@ -164,6 +174,12 @@ const api: RendererApi = {
       ipcRenderer.on('engine:progress', handler)
       return () => ipcRenderer.removeListener('engine:progress', handler)
     }
+  },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get') as Promise<AppSettings>,
+    save: (settings: Partial<AppSettings>) => ipcRenderer.invoke('settings:save', settings) as Promise<void>,
+    testConnection: () => ipcRenderer.invoke('settings:testConnection') as Promise<{ ok: boolean; error?: string }>,
+    listModels: (provider?: string) => ipcRenderer.invoke('settings:listModels', provider) as Promise<string[]>
   }
 }
 

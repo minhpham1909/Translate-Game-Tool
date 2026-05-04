@@ -16,26 +16,28 @@ export function initDatabase(): Database.Database {
   // Lấy đường dẫn an toàn để lưu data: C:\Users\<User>\AppData\Roaming\<App_Name>
   const userDataPath = app.getPath('userData')
   const dbDir = path.join(userDataPath, 'db')
-  
+
   // Đảm bảo thư mục lưu trữ tồn tại
   fs.ensureDirSync(dbDir)
-  
+
   const dbPath = path.join(dbDir, 'translation_project.sqlite')
-  
+  console.log(`[System] userData: ${userDataPath}`)
+  console.log(`[System] dbPath: ${dbPath}`)
+
   // Khởi tạo DB
-  db = new Database(dbPath, { 
+  db = new Database(dbPath, {
     // Uncomment dòng dưới nếu muốn debug log query ra console
-    // verbose: console.log 
+    // verbose: console.log
   })
-  
+
   // Bật tính năng WAL để tăng performance I/O
   db.pragma('journal_mode = WAL')
   // Bật Foreign Keys
   db.pragma('foreign_keys = ON')
-  
+
   // Thiết lập Schema
   setupSchema(db)
-  
+
   return db
 }
 
@@ -45,15 +47,15 @@ export function initDatabase(): Database.Database {
 function setupSchema(db: Database.Database): void {
   // Dùng transaction để đảm bảo tạo toàn bộ schema một cách nguyên vẹn (atomically)
   const initTransaction = db.transaction(() => {
-    
+
     // 1. Bảng files: Quản lý danh sách file rpy
     db.exec(`
       CREATE TABLE IF NOT EXISTS files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         file_path TEXT UNIQUE NOT NULL,
         file_name TEXT NOT NULL,
-        total_blocks INTEGER DEFAULT 0,       
-        translated_blocks INTEGER DEFAULT 0,  
+        total_blocks INTEGER DEFAULT 0,
+        translated_blocks INTEGER DEFAULT 0,
         status TEXT DEFAULT 'pending',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -64,12 +66,12 @@ function setupSchema(db: Database.Database): void {
     db.exec(`
       CREATE TABLE IF NOT EXISTS translation_blocks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        file_id INTEGER NOT NULL,             
+        file_id INTEGER NOT NULL,
         block_hash TEXT NOT NULL,
         block_type TEXT NOT NULL,
         character_id TEXT,
-        original_text TEXT NOT NULL,          
-        translated_text TEXT,                 
+        original_text TEXT NOT NULL,
+        translated_text TEXT,
         status TEXT DEFAULT 'empty',
         indentation TEXT NOT NULL,
         line_index INTEGER NOT NULL,
@@ -84,9 +86,9 @@ function setupSchema(db: Database.Database): void {
     db.exec(`
       CREATE TABLE IF NOT EXISTS translation_memory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        original_text TEXT UNIQUE NOT NULL,   
+        original_text TEXT UNIQUE NOT NULL,
         translated_text TEXT NOT NULL,
-        usage_count INTEGER DEFAULT 1,        
+        usage_count INTEGER DEFAULT 1,
         last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `)
@@ -94,9 +96,9 @@ function setupSchema(db: Database.Database): void {
     // 4. Bảng ảo blocks_fts: Phục vụ tính năng Full-Text Search
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS blocks_fts USING fts5(
-        original_text, 
-        translated_text, 
-        content='translation_blocks', 
+        original_text,
+        translated_text,
+        content='translation_blocks',
         content_rowid='id'
       );
     `)
@@ -104,22 +106,22 @@ function setupSchema(db: Database.Database): void {
     // 5. Triggers: Tự động đồng bộ từ translation_blocks sang blocks_fts
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS tbl_ai_after_insert AFTER INSERT ON translation_blocks BEGIN
-        INSERT INTO blocks_fts(rowid, original_text, translated_text) 
+        INSERT INTO blocks_fts(rowid, original_text, translated_text)
         VALUES (new.id, new.original_text, new.translated_text);
       END;
     `)
 
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS tbl_ai_after_update AFTER UPDATE ON translation_blocks BEGIN
-        UPDATE blocks_fts 
-        SET original_text = new.original_text, translated_text = new.translated_text 
+        UPDATE blocks_fts
+        SET original_text = new.original_text, translated_text = new.translated_text
         WHERE rowid = old.id;
       END;
     `)
 
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS tbl_ai_after_delete AFTER DELETE ON translation_blocks BEGIN
-        INSERT INTO blocks_fts(blocks_fts, rowid, original_text, translated_text) 
+        INSERT INTO blocks_fts(blocks_fts, rowid, original_text, translated_text)
         VALUES('delete', old.id, old.original_text, old.translated_text);
       END;
     `)

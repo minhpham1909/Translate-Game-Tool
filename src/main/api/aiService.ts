@@ -62,7 +62,7 @@ class GeminiTranslator implements IAITranslator {
       items: { type: SchemaType.STRING }
     };
 
-    const model = this.genAI.getGenerativeModel({ 
+    const model = this.genAI.getGenerativeModel({
       model: this.modelName,
       systemInstruction: getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText),
       generationConfig: {
@@ -77,62 +77,257 @@ class GeminiTranslator implements IAITranslator {
     try {
       const result = await model.generateContent(prompt);
       const responseText = result.response.text();
-      
+
       const translatedArray: string[] = JSON.parse(responseText);
-      
+
       if (translatedArray.length !== texts.length) {
         throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
       }
 
       return translatedArray;
     } catch (error) {
-      throw error; 
+      throw error;
     }
   }
 }
 
 // ============================================================================
-// 4. IMPLEMENTATION STUBS CHO CÁC MODEL KHÁC (Sẽ triển khai sau)
+// 4. IMPLEMENTATION CHO OPENAI / GPT
+// ============================================================================
+class GPTTranslator implements IAITranslator {
+  providerName = 'GPT';
+  private apiKey: string;
+  private modelName: string;
+  private endpoint: string;
+
+  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
+    this.apiKey = apiKey;
+    this.modelName = modelName;
+    this.endpoint = customEndpoint || 'https://api.openai.com/v1/chat/completions';
+  }
+
+  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
+    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
+
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: this.modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: settings.temperature,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`[AI Service | GPT] API Error ${response.status}: ${body}`);
+    }
+
+    const data = await response.json();
+    const content: string = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('[AI Service | GPT] Empty response from API');
+    }
+
+    const translatedArray: string[] = JSON.parse(content);
+    if (translatedArray.length !== texts.length) {
+      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
+    }
+
+    return translatedArray;
+  }
+}
+
+// ============================================================================
+// 5. IMPLEMENTATION CHO CLAUDE (Anthropic)
 // ============================================================================
 class ClaudeTranslator implements IAITranslator {
   providerName = 'Claude';
-  // TODO: Lưu các tham số khi triển khai thực sự
-  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
-  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
-    throw new Error("Claude is not yet implemented.");
+  private apiKey: string;
+  private modelName: string;
+  private endpoint: string;
+
+  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
+    this.apiKey = apiKey;
+    this.modelName = modelName;
+    this.endpoint = customEndpoint || 'https://api.anthropic.com/v1/messages';
+  }
+
+  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
+    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
+
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: this.modelName,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 4096,
+        temperature: settings.temperature
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`[AI Service | Claude] API Error ${response.status}: ${body}`);
+    }
+
+    const data = await response.json();
+    const content: string = data.content?.[0]?.text;
+    if (!content) {
+      throw new Error('[AI Service | Claude] Empty response from API');
+    }
+
+    const translatedArray: string[] = JSON.parse(content);
+    if (translatedArray.length !== texts.length) {
+      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
+    }
+
+    return translatedArray;
   }
 }
 
-class GPTTranslator implements IAITranslator {
-  providerName = 'GPT';
-  // TODO: Lưu các tham số khi triển khai thực sự
-  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
-  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
-    throw new Error("GPT (OpenAI) is not yet implemented.");
-  }
-}
-
+// ============================================================================
+// 6. IMPLEMENTATION CHO DEEPSEEK
+// ============================================================================
 class DeepSeekTranslator implements IAITranslator {
   providerName = 'DeepSeek';
-  // TODO: Lưu các tham số khi triển khai thực sự
-  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
-  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
-    throw new Error("DeepSeek is not yet implemented.");
+  private apiKey: string;
+  private modelName: string;
+  private endpoint: string;
+
+  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
+    this.apiKey = apiKey;
+    this.modelName = modelName;
+    this.endpoint = customEndpoint || 'https://api.deepseek.com/v1/chat/completions';
+  }
+
+  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
+    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
+
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: this.modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: settings.temperature,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`[AI Service | DeepSeek] API Error ${response.status}: ${body}`);
+    }
+
+    const data = await response.json();
+    const content: string = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('[AI Service | DeepSeek] Empty response from API');
+    }
+
+    const translatedArray: string[] = JSON.parse(content);
+    if (translatedArray.length !== texts.length) {
+      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
+    }
+
+    return translatedArray;
   }
 }
 
+// ============================================================================
+// 7. IMPLEMENTATION CHO GROK (xAI)
+// ============================================================================
 class GrokTranslator implements IAITranslator {
   providerName = 'Grok';
-  // TODO: Lưu các tham số khi triển khai thực sự
-  constructor(_apiKey: string, _modelName: string, _customEndpoint?: string) {}
-  async translate(_texts: string[], _settings: AppSettings, _glossaryText: string = ""): Promise<string[]> {
-    throw new Error("Grok is not yet implemented.");
+  private apiKey: string;
+  private modelName: string;
+  private endpoint: string;
+
+  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
+    this.apiKey = apiKey;
+    this.modelName = modelName;
+    this.endpoint = customEndpoint || 'https://api.x.ai/v1/chat/completions';
+  }
+
+  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
+    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
+
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: this.modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: settings.temperature,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`[AI Service | Grok] API Error ${response.status}: ${body}`);
+    }
+
+    const data = await response.json();
+    const content: string = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('[AI Service | Grok] Empty response from API');
+    }
+
+    const translatedArray: string[] = JSON.parse(content);
+    if (translatedArray.length !== texts.length) {
+      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
+    }
+
+    return translatedArray;
   }
 }
 
 // ============================================================================
 // 5. GLOBAL AI SERVICE (Core Manager)
 // ============================================================================
+
+export const DEFAULT_MODELS: Record<string, string[]> = {
+  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  gpt: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  claude: ['claude-sonnet-4-20250514', 'claude-opus-4-20250414', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  grok: ['grok-3', 'grok-3-fast', 'grok-2']
+};
+
 export class AIService {
   /**
    * Gọi API dịch thuật dựa trên cấu hình Global Settings của người dùng.
@@ -140,9 +335,9 @@ export class AIService {
    */
   static async translateBatch(texts: string[], glossaryText: string = ""): Promise<string[]> {
     const settings = getSettings();
-    const activeProvider = settings.activeProvider || 'gemini'; // 'gemini' | 'openai' | 'claude'
+    const activeProvider = settings.activeProvider || 'gemini';
     const apiKey = settings.apiKeys[activeProvider];
-    const modelId = settings.activeModelId || 'gemini-1.5-flash';
+    let modelId = settings.activeModelId || '';
 
     if (!apiKey) {
       const errorMsg = `[AI Service Error] Missing API Key for provider: ${activeProvider.toUpperCase()}`;
@@ -152,7 +347,14 @@ export class AIService {
 
     let translator: IAITranslator;
 
-    // Factory logic: Chọn Model dựa theo setting
+    if (!modelId) {
+      const models = await AIService.listModels(activeProvider)
+      if (models.length === 0) {
+        throw new Error(`[AI Service Error] No available models for provider: ${activeProvider.toUpperCase()}`)
+      }
+      modelId = models[0]
+    }
+
     switch (activeProvider.toLowerCase()) {
       case 'gemini':
         translator = new GeminiTranslator(apiKey, modelId);
@@ -174,19 +376,142 @@ export class AIService {
         throw new Error(`[AI Service Error] Unsupported provider: ${activeProvider}`);
     }
 
-    console.log(`[AI Service | ${translator.providerName}] Bắt đầu dịch batch ${texts.length} câu...`);
+    console.log(`[AI Service | ${translator.providerName}] Translating batch of ${texts.length} item(s)...`);
     const startTime = Date.now();
 
     try {
       const result = await translator.translate(texts, settings, glossaryText);
-      
+
       const duration = Date.now() - startTime;
-      console.log(`[AI Service | ${translator.providerName}] Dịch thành công ${texts.length} câu (${duration}ms).`);
-      
+      console.log(`[AI Service | ${translator.providerName}] Translation OK for ${texts.length} item(s) (${duration}ms).`);
+
       return result;
     } catch (error) {
-      console.error(`[AI Service | ${translator.providerName}] Lỗi trong quá trình dịch:`, error);
-      throw error; // Quăng lỗi lên cho UI hoặc Queue Manager xử lý (Retry/Hiển thị lỗi)
+      console.error(`[AI Service | ${translator.providerName}] Translation error:`, error);
+      throw error;
     }
+  }
+
+  static async listModels(providerOverride?: string): Promise<string[]> {
+    const settings = getSettings();
+    const activeProvider = (providerOverride || settings.activeProvider || 'gemini').toLowerCase();
+    const apiKey = settings.apiKeys[activeProvider as keyof typeof settings.apiKeys];
+
+    const defaults = DEFAULT_MODELS[activeProvider] || DEFAULT_MODELS['gemini'];
+
+    if (!apiKey) {
+      return defaults;
+    }
+
+    if (activeProvider === 'gemini') {
+      try {
+        const url = new URL('https://generativelanguage.googleapis.com/v1beta/models')
+        url.searchParams.set('key', apiKey)
+
+        const response = await fetch(url.toString())
+        if (!response.ok) {
+          return defaults;
+        }
+
+        const data = (await response.json()) as {
+          models?: Array<{
+            name?: string
+            supportedGenerationMethods?: string[]
+          }>
+        }
+
+        const remoteModels = (data.models || [])
+          .filter((model) => (model.supportedGenerationMethods || []).includes('generateContent'))
+          .map((model) => (model.name || '').replace('models/', ''))
+          .filter((name) => name.length > 0);
+
+        if (remoteModels.length > 0) {
+          return remoteModels;
+        }
+      } catch {
+        return defaults;
+      }
+    }
+
+    if (activeProvider === 'gpt' || activeProvider === 'openai') {
+      try {
+        const response = await fetch('https://api.openai.com/v1/models', {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        if (!response.ok) {
+          return defaults;
+        }
+        const data = await response.json();
+        const remoteModels = (data.data || [])
+          .map((m: { id: string }) => m.id)
+          .filter((id: string) => id.includes('gpt') || id.includes('o1') || id.includes('o3'));
+        if (remoteModels.length > 0) {
+          return remoteModels;
+        }
+      } catch {
+        return defaults;
+      }
+    }
+
+    if (activeProvider === 'claude') {
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/models', {
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          }
+        });
+        if (!response.ok) {
+          return defaults;
+        }
+        const data = await response.json();
+        const remoteModels = (data.data || [])
+          .map((m: { id: string }) => m.id)
+          .filter((id: string) => id.includes('claude'));
+        if (remoteModels.length > 0) {
+          return remoteModels;
+        }
+      } catch {
+        return defaults;
+      }
+    }
+
+    if (activeProvider === 'deepseek') {
+      try {
+        const response = await fetch('https://api.deepseek.com/v1/models', {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        if (!response.ok) {
+          return defaults;
+        }
+        const data = await response.json();
+        const remoteModels = (data.data || []).map((m: { id: string }) => m.id);
+        if (remoteModels.length > 0) {
+          return remoteModels;
+        }
+      } catch {
+        return defaults;
+      }
+    }
+
+    if (activeProvider === 'grok') {
+      try {
+        const response = await fetch('https://api.x.ai/v1/models', {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        if (!response.ok) {
+          return defaults;
+        }
+        const data = await response.json();
+        const remoteModels = (data.data || []).map((m: { id: string }) => m.id);
+        if (remoteModels.length > 0) {
+          return remoteModels;
+        }
+      } catch {
+        return defaults;
+      }
+    }
+
+    return defaults;
   }
 }

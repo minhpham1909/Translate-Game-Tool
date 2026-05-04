@@ -12,14 +12,14 @@ export async function exportFile(fileId: number): Promise<void> {
   const db = getDatabase()
   const project = getProjectConfig()
 
-  if (!project) throw new Error('Chưa thiết lập Project Config.')
+  if (!project) throw new Error('Project config is not set.')
 
   // 1. Lấy thông tin File và Blocks
   const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
-  if (!fileRecord) throw new Error(`Không tìm thấy file ID: ${fileId}`)
+  if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
 
   const blocks = db.prepare(`SELECT * FROM translation_blocks WHERE file_id = ?`).all(fileId) as TranslationBlock[]
-  
+
   // Tạo Hash Map để tra cứu O(1) theo line_index
   const blockMap = new Map<number, TranslationBlock>()
   for (const b of blocks) {
@@ -31,14 +31,14 @@ export async function exportFile(fileId: number): Promise<void> {
   const targetPath = path.join(project.gameFolderPath, 'tl', project.targetLanguage, fileRecord.file_path)
 
   const exists = await fs.pathExists(sourcePath)
-  if (!exists) throw new Error(`Không tìm thấy file nguồn: ${sourcePath}`)
+  if (!exists) throw new Error(`Source file not found: ${sourcePath}`)
 
   // 3. Sao lưu nếu file Target đã tồn tại
   if (await fs.pathExists(targetPath)) {
     const timestamp = new Date().getTime()
     const backupPath = `${targetPath}.backup_${timestamp}`
     await fs.copy(targetPath, backupPath)
-    console.log(`[Export] Đã sao lưu bản cũ: ${backupPath}`)
+    console.log(`[Export] Backup created: ${backupPath}`)
   }
 
   // 4. Đọc file Source và thực hiện Cross-Translation Transform
@@ -68,12 +68,12 @@ export async function exportFile(fileId: number): Promise<void> {
 
       if (block.block_type === 'dialogue') {
         const charPrefix = block.character_id ? `${block.character_id} ` : ''
-        
+
         // Chỉ thêm comment gốc nếu bản dịch khác với bản gốc (tức là không phải fallback)
         if (finalTargetText !== block.original_text) {
           targetLines.push(`${block.indentation}# ${charPrefix}"${block.original_text}"`)
         }
-        
+
         targetLines.push(`${block.indentation}${charPrefix}"${finalTargetText}"`)
         continue
       }
@@ -94,7 +94,7 @@ export async function exportFile(fileId: number): Promise<void> {
 
   // 6. Cập nhật trạng thái
   db.prepare(`UPDATE files SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fileId)
-  console.log(`[Export] Thành công: ${targetPath}`)
+  console.log(`[Export] Exported: ${targetPath}`)
 }
 
 /**
@@ -104,16 +104,16 @@ export async function restoreBackup(fileId: number, backupFilePath: string): Pro
   const db = getDatabase()
   const project = getProjectConfig()
 
-  if (!project) throw new Error('Chưa thiết lập Project Config.')
+  if (!project) throw new Error('Project config is not set.')
 
   const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
-  if (!fileRecord) throw new Error(`Không tìm thấy file ID: ${fileId}`)
+  if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
 
   const targetPath = path.join(project.gameFolderPath, 'tl', project.targetLanguage, fileRecord.file_path)
 
   const exists = await fs.pathExists(backupFilePath)
-  if (!exists) throw new Error(`Không tìm thấy file backup: ${backupFilePath}`)
+  if (!exists) throw new Error(`Backup file not found: ${backupFilePath}`)
 
   await fs.copy(backupFilePath, targetPath)
-  console.log(`[Export] Đã khôi phục file gốc từ: ${backupFilePath}`)
+  console.log(`[Export] Restored from backup: ${backupFilePath}`)
 }

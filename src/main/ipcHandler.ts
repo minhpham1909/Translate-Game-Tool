@@ -1,18 +1,20 @@
-import { ipcMain } from 'electron'
-import { scanAvailableLanguages, setupProject, getCurrentProject } from './api/projectIpc'
+import { dialog, ipcMain } from 'electron'
+import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProjects } from './api/projectIpc'
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
 import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation } from './services/workspaceService'
 import { preFlightAnalyzer, startQueue, stopQueue, translateBatchByBlockIds } from './services/translationEngine'
-import type { ProjectConfig } from '../shared/types'
+import { AIService } from './api/aiService'
+import { getSettings, saveSettings } from './store/settings'
+import type { AppSettings, ProjectConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
   // --- Project & Settings ---
   ipcMain.handle('project:scanLanguages', async (_, gamePath: string) => {
     return await scanAvailableLanguages(gamePath)
   })
-  
+
   ipcMain.handle('project:setup', (_, config: ProjectConfig) => {
     return setupProject(config)
   })
@@ -21,19 +23,54 @@ export function registerIpcHandlers(): void {
     return getCurrentProject()
   })
 
+  ipcMain.handle('project:getRecent', () => {
+    return getRecentProjects()
+  })
+
+  ipcMain.handle('project:selectFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory']
+    })
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
+
+  // --- Settings ---
+  ipcMain.handle('settings:get', () => {
+    return getSettings()
+  })
+
+  ipcMain.handle('settings:save', (_, partial: Partial<AppSettings>) => {
+    return saveSettings(partial)
+  })
+
+  ipcMain.handle('settings:testConnection', async () => {
+    try {
+      await AIService.translateBatch(['ping'])
+      return { ok: true }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: message }
+    }
+  })
+
+  ipcMain.handle('settings:listModels', async (_, provider?: string) => {
+    return AIService.listModels(provider)
+  })
+
   // --- Glossary ---
   ipcMain.handle('glossary:getAll', () => {
     return getAllGlossaries()
   })
-  
+
   ipcMain.handle('glossary:add', (_, entry: { source_text: string; target_text: string; notes?: string }) => {
     return addGlossary(entry)
   })
-  
+
   ipcMain.handle('glossary:update', (_, id: number, entry: { source_text: string; target_text: string; notes?: string }) => {
     return updateGlossary(id, entry)
   })
-  
+
   ipcMain.handle('glossary:delete', (_, id: number) => {
     return deleteGlossary(id)
   })
@@ -42,11 +79,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tm:getAll', () => {
     return getTMEntries()
   })
-  
+
   ipcMain.handle('tm:delete', (_, id: number) => {
     return deleteTMEntry(id)
   })
-  
+
   ipcMain.handle('tm:clearUnused', () => {
     return clearUnusedTM()
   })

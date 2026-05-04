@@ -98,36 +98,39 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
         </div>
 
         {/* Recent Projects */}
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-xl">
           <div className="flex items-center gap-2 mb-3">
             <Clock className="size-3.5 text-muted-foreground" />
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Recent Projects
+              Recent Projects ({recentProjects.length})
             </span>
           </div>
 
           {recentProjects.length === 0 ? (
-            <div className="flex items-center justify-center h-20 rounded-lg border border-dashed border-border">
+            <div className="flex items-center justify-center h-24 rounded-lg border border-dashed border-border">
               <p className="text-xs text-muted-foreground italic">Chưa có project nào gần đây</p>
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-2 max-h-64 overflow-auto pr-1">
               {recentProjects.map((project, index) => (
                 <button
                   key={index}
                   id={`recent-project-${index}`}
                   onClick={() => onOpenProject(project)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-md border border-border bg-card hover:border-primary/40 hover:bg-accent transition-all group text-left"
+                  className="w-full flex items-start justify-between gap-3 px-3 py-3 rounded-md border border-border bg-card hover:border-primary/40 hover:bg-accent transition-all group text-left"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <FolderOpen className="size-4 text-muted-foreground flex-shrink-0" />
+                  <div className="flex items-start gap-3 min-w-0">
+                    <FolderOpen className="size-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                     <div className="min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate font-mono">
+                      <p className="text-xs font-medium text-foreground font-mono whitespace-normal break-all">
                         {project.gameFolderPath}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {project.sourceLanguage} → {project.targetLanguage} · {project.lastOpenedAt}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                        <span className="px-1.5 py-0.5 rounded border border-border bg-muted/40">
+                          {project.sourceLanguage} → {project.targetLanguage}
+                        </span>
+                        <span>{project.lastOpenedAt}</span>
+                      </div>
                     </div>
                   </div>
                   <ChevronRight className="size-3.5 text-muted-foreground flex-shrink-0 group-hover:text-foreground transition-colors" />

@@ -45,6 +45,13 @@ export interface ProjectConfig {
   targetLanguage: string; // Ngôn ngữ đích (ví dụ: 'vietnamese')
 }
 
+export interface RecentProject {
+  gameFolderPath: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  lastOpenedAt: string;
+}
+
 // Định nghĩa các AI Provider được hỗ trợ chính thức
 export type AIProvider = 'gemini' | 'claude' | 'gpt' | 'deepseek' | 'grok';
 

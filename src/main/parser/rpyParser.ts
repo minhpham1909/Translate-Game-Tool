@@ -17,31 +17,31 @@ export interface ParseResult {
 /**
  * Phân tích cú pháp file .rpy để trích xuất các translation blocks.
  * Hàm này duyệt qua từng dòng và dùng Regex để capture.
- * 
+ *
  * @param filePath Đường dẫn tuyệt đối đến file .rpy
  * @param relativePath Đường dẫn tương đối (ví dụ: game/tl/vietnamese/script.rpy)
  */
 export async function parseRpyFile(filePath: string, relativePath: string): Promise<ParseResult> {
   const lines = await readFileLines(filePath)
   const blocks: Omit<TranslationBlock, 'id' | 'file_id'>[] = []
-  
+
   let state = ParserState.OUTSIDE
   let currentBlockHash = ''
-  
+
   // Regex patterns
   // Dialogue header: `translate vietnamese start_a170b500:`
   // G1: indent, G2: language, G3: block_hash
   const dialogueHeaderRegex = /^(\s*)translate\s+(\w+)\s+([a-zA-Z0-9_]+):$/
-  
+
   // String header: `translate vietnamese strings:`
   // G1: indent, G2: language
   const stringHeaderRegex = /^(\s*)translate\s+(\w+)\s+strings:$/
-  
+
   // Comment line (Cross-Translation: sẽ bỏ qua toàn bộ khi parse - chỉ lấy dòng active)
   // const commentRegex = /^(\s*)#\s*([a-zA-Z0-9_]*)\s+"(.*)"$/
   // NOTE: Không sử dụng commentRegex vì Cross-Translation chỉ đọc dòng active (tiếng Anh)
   // và bỏ qua hoàn toàn dòng comment (tiếng Nhật)
-  
+
   // Translated dialogue line: `e "Translated text"`
   // G1: indent, G2: character_id (optional), G3: translated text
   const dialogueLineRegex = /^(\s*)([a-zA-Z0-9_]*)\s+"(.*)"$/
@@ -49,34 +49,34 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
   // String old block: `old "Start Game"`
   // G1: indent, G2: original text
   const oldStringRegex = /^(\s*)old\s+"(.*)"$/
-  
+
   // String new block: `new "Bắt đầu Game"`
   // G1: indent, G2: translated text
   const newStringRegex = /^(\s*)new\s+"(.*)"$/
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    
+
     // Nếu gặp 1 khối translate mới, reset state về OUTSIDE để bắt đầu lại
     if (/^\s*translate\s+/.test(line)) {
       state = ParserState.OUTSIDE
     }
 
     if (state === ParserState.OUTSIDE) {
-      // 1. Check if entering Dialogue Block
-      const dialogueMatch = line.match(dialogueHeaderRegex)
-      if (dialogueMatch) {
-        state = ParserState.IN_DIALOGUE_BLOCK
-        currentBlockHash = dialogueMatch[3]
-        continue
-      }
-
-      // 2. Check if entering String Block
+      // 1. Check if entering String Block
       const stringMatch = line.match(stringHeaderRegex)
       if (stringMatch) {
         state = ParserState.IN_STRING_BLOCK
         // String block không có hash chung, ta sẽ tự generate dựa vào dòng
-        currentBlockHash = 'strings' 
+        currentBlockHash = 'strings'
+        continue
+      }
+
+      // 2. Check if entering Dialogue Block
+      const dialogueMatch = line.match(dialogueHeaderRegex)
+      if (dialogueMatch) {
+        state = ParserState.IN_DIALOGUE_BLOCK
+        currentBlockHash = dialogueMatch[3]
         continue
       }
     }
@@ -92,7 +92,7 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
       if (lineMatch) {
         const charId = lineMatch[2] || null
         const activeText = lineMatch[3]
-        
+
         blocks.push({
           block_hash: currentBlockHash,
           block_type: 'dialogue',
@@ -103,7 +103,7 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
           indentation: lineMatch[1], // Capture exact indent (CRITICAL)
           line_index: i // Lưu vị trí dòng để ghi đè đúng dòng active
         })
-        
+
         // Reset cho block tiếp theo
         state = ParserState.OUTSIDE
       }
@@ -122,7 +122,7 @@ export async function parseRpyFile(filePath: string, relativePath: string): Prom
       const newMatch = line.match(newStringRegex)
       if (newMatch) {
         const activeText = newMatch[2]
-        
+
         blocks.push({
           block_hash: `string_line_${i}`, // Tạo hash dựa vào dòng
           block_type: 'string',
@@ -168,22 +168,20 @@ export function importRpyToDatabase(parseResult: ParseResult): void {
         status = excluded.status,
         updated_at = CURRENT_TIMESTAMP
     `)
-    
-    const fileResult = stmtFile.run(
-      fileRecord.file_path, 
-      fileRecord.file_name, 
-      fileRecord.total_blocks, 
-      fileRecord.translated_blocks, 
+
+    stmtFile.run(
+      fileRecord.file_path,
+      fileRecord.file_name,
+      fileRecord.total_blocks,
+      fileRecord.translated_blocks,
       fileRecord.status
     )
-    
-    let fileId: number
-    if (fileResult.changes > 0 && fileResult.lastInsertRowid) {
-      fileId = fileResult.lastInsertRowid as number
-    } else {
-      const row = db.prepare('SELECT id FROM files WHERE file_path = ?').get(fileRecord.file_path) as { id: number }
-      fileId = row.id
+
+    const row = db.prepare('SELECT id FROM files WHERE file_path = ?').get(fileRecord.file_path) as { id: number } | undefined
+    if (!row) {
+      throw new Error(`File record not found after upsert: ${fileRecord.file_path}`)
     }
+    const fileId = row.id
 
     // 2. Xóa các blocks cũ của file này nếu chúng ta re-parse (idempotent)
     db.prepare('DELETE FROM translation_blocks WHERE file_id = ?').run(fileId)
@@ -191,7 +189,7 @@ export function importRpyToDatabase(parseResult: ParseResult): void {
     // 3. Batch insert (Bulk Insert) hàng ngàn blocks rất nhanh
     const stmtBlock = db.prepare(`
       INSERT INTO translation_blocks (
-        file_id, block_hash, block_type, character_id, 
+        file_id, block_hash, block_type, character_id,
         original_text, translated_text, status, indentation, line_index
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

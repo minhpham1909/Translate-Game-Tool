@@ -27,7 +27,7 @@ function updateFileStats(db: Db, fileId: number): void {
   const stats = db
     .prepare(
       `
-    SELECT 
+    SELECT
       COUNT(*) as total,
       SUM(CASE WHEN status IN ('draft', 'approved', 'warning') THEN 1 ELSE 0 END) as translated
     FROM translation_blocks
@@ -45,7 +45,7 @@ function updateFileStats(db: Db, fileId: number): void {
 
   db.prepare(
     `
-    UPDATE files 
+    UPDATE files
     SET total_blocks = ?, translated_blocks = ?, status = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `
@@ -135,7 +135,7 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
     const stmtInsertTM = enableTM
       ? db.prepare(
           `
-            INSERT INTO translation_memory (original_text, translated_text) 
+            INSERT INTO translation_memory (original_text, translated_text)
             VALUES (?, ?)
             ON CONFLICT(original_text) DO NOTHING
           `
@@ -177,8 +177,8 @@ export async function preFlightAnalyzer(
     ? (db
         .prepare(
           `
-      SELECT COUNT(*) as blockCount, SUM(LENGTH(original_text)) as charCount 
-      FROM translation_blocks 
+      SELECT COUNT(*) as blockCount, SUM(LENGTH(original_text)) as charCount
+      FROM translation_blocks
       WHERE status = 'empty' AND file_id = ?
     `
         )
@@ -186,13 +186,13 @@ export async function preFlightAnalyzer(
     : (db
         .prepare(
           `
-      SELECT COUNT(*) as blockCount, SUM(LENGTH(original_text)) as charCount 
-      FROM translation_blocks 
+      SELECT COUNT(*) as blockCount, SUM(LENGTH(original_text)) as charCount
+      FROM translation_blocks
       WHERE status = 'empty'
     `
         )
         .get() as { blockCount: number; charCount: number })
-  
+
   return {
     pendingBlocks: row.blockCount || 0,
     estimatedCharacters: row.charCount || 0,
@@ -230,7 +230,7 @@ export async function startBackgroundQueue(
       ? (db
           .prepare(
             `
-        SELECT * FROM translation_blocks 
+        SELECT * FROM translation_blocks
         WHERE status = 'empty' AND file_id = ?
         LIMIT ?
       `
@@ -239,15 +239,15 @@ export async function startBackgroundQueue(
       : (db
           .prepare(
             `
-        SELECT * FROM translation_blocks 
-        WHERE status = 'empty' 
+        SELECT * FROM translation_blocks
+        WHERE status = 'empty'
         LIMIT ?
       `
           )
           .all(batchSize) as TranslationBlock[])
 
     if (pendingBlocks.length === 0) {
-      console.log('[Queue] Đã dịch xong toàn bộ!')
+      console.log('[Queue] All batches completed.')
       emitSystemLog('success', '[Queue] Completed.')
       hasMore = false
       break
@@ -272,7 +272,7 @@ export async function startBackgroundQueue(
         )
       : null
     const fileIdsTouched = new Set<number>()
-    
+
     // Giai đoạn 1: Lọc qua TM để tiết kiệm API
     db.transaction(() => {
       for (let i = 0; i < pendingBlocks.length; i++) {
@@ -285,12 +285,12 @@ export async function startBackgroundQueue(
         const tmRecord = enableTM && stmtCheckTM
           ? (stmtCheckTM.get(block.original_text) as { translated_text: string } | undefined)
           : undefined
-        
+
         if (tmRecord) {
           // TM hit! Kéo qua linter kiểm tra lại cho chắc
           const errors = validateTranslation(block.original_text, tmRecord.translated_text)
           const status = errors.length > 0 ? 'warning' : 'draft'
-          
+
           stmtUpdateBlock.run(tmRecord.translated_text, 'tm', status, blockId)
           if (enableTM && stmtUpdateTMUsage) stmtUpdateTMUsage.run(block.original_text)
           totalSuccess++
@@ -312,23 +312,23 @@ export async function startBackgroundQueue(
     if (textsToTranslate.length > 0) {
       let attempts = 0
       let success = false
-      
+
       while (attempts < 3 && !success) {
         try {
-          console.log(`[Queue] Bắt đầu gọi API cho ${textsToTranslate.length} dòng...`)
+          console.log(`[Queue] Calling AI for ${textsToTranslate.length} line(s)...`)
           emitSystemLog('info', `[Queue] Calling AI for ${textsToTranslate.length} line(s)...`)
-          
+
           // Truyền từ điển đã parse vào
           const translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText)
-          
-          if (translatedTexts.length !== textsToTranslate.length) {
-             throw new Error(`Độ dài mảng output JSON (${translatedTexts.length}) không khớp với input (${textsToTranslate.length})`)
-          }
+
+           if (translatedTexts.length !== textsToTranslate.length) {
+             throw new Error(`JSON output length (${translatedTexts.length}) does not match input (${textsToTranslate.length})`)
+           }
 
           // 4. Lưu kết quả API vào DB & Cập nhật TM
           const stmtInsertTM = enableTM
             ? db.prepare(`
-              INSERT INTO translation_memory (original_text, translated_text) 
+              INSERT INTO translation_memory (original_text, translated_text)
               VALUES (?, ?)
               ON CONFLICT(original_text) DO NOTHING
             `)
@@ -340,15 +340,15 @@ export async function startBackgroundQueue(
               const block = blockMapping[i]
               const blockId = block?.id as number | undefined
               if (!blockId) continue
-              
+
               // Chạy qua Linter để bắt lỗi mất Tag/Biến
               const errors = validateTranslation(block.original_text, translated)
               const status = errors.length > 0 ? 'warning' : 'draft'
-              
+
               if (errors.length > 0) {
-                console.log(`[Linter] Cảnh báo tại block ${block.id}:`, errors)
+                console.log(`[Linter] Warnings at block ${block.id}:`, errors)
               }
-              
+
               stmtUpdateBlock.run(translated, settings.activeProvider, status, blockId)
               if (enableTM && stmtInsertTM) stmtInsertTM.run(block.original_text, translated)
               totalSuccess++
@@ -359,7 +359,7 @@ export async function startBackgroundQueue(
           })()
 
           success = true
-          
+
           // Phát event ra UI
           if (onProgress) onProgress({ success: totalSuccess, error: totalError })
           emitEngineProgress({ success: totalSuccess, error: totalError })
@@ -369,9 +369,9 @@ export async function startBackgroundQueue(
           attempts++
           totalError++
           const message = error instanceof Error ? error.message : String(error)
-          console.error(`[Queue] Lỗi gọi API (lần ${attempts}):`, message)
+          console.error(`[Queue] API error (attempt ${attempts}):`, message)
           emitSystemLog('error', `[Queue] API error (attempt ${attempts}): ${message}`)
-          
+
           // Xử lý Rate Limit (HTTP 429) bằng Exponential Backoff
           const maybeStatus =
             typeof error === 'object' && error !== null && 'status' in error
@@ -380,11 +380,11 @@ export async function startBackgroundQueue(
           const status = typeof maybeStatus === 'number' ? maybeStatus : undefined
           if (status === 429 || message.includes('429')) {
              const waitTime = Math.pow(2, attempts) * 1000 // 2s -> 4s -> 8s
-             console.log(`[Queue] Bị Rate Limit, đợi ${waitTime}ms trước khi thử lại...`)
+             console.log(`[Queue] Rate limited. Waiting ${waitTime}ms before retry...`)
              await delay(waitTime, signal)
           } else {
              // Lỗi nghiêm trọng (sai API Key, mất mạng), tạm dừng toàn bộ queue
-             console.error(`[Queue] Lỗi nghiêm trọng, dừng queue.`)
+             console.error('[Queue] Fatal error. Stopping queue.')
              emitSystemLog('error', `[Queue] Fatal error. Stopping queue.`)
              hasMore = false
              break
@@ -392,7 +392,7 @@ export async function startBackgroundQueue(
         }
       }
     }
-    
+
     // Tạm nghỉ 1s giữa các batch để tránh spam API liên tục gây rate limit
     await delay(1000, signal)
   }

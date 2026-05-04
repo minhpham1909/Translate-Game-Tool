@@ -22,6 +22,7 @@ import { BottomBar, LogEntry, LogType } from '@renderer/components/cat-tool/Bott
 import { SettingsModal } from '@renderer/components/cat-tool/SettingsModal'
 import { UITranslationBlock } from '@renderer/components/cat-tool/TranslationCard'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
+import type { RecentProject } from '../../shared/types'
 // ============================================================
 
 
@@ -65,8 +66,14 @@ const DEFAULT_MODAL_STATE: ModalState = {
 // ============================================================
 function CATWorkspace({
   onNewProject,
+  onChangeLocation,
+  recentProjects,
+  onOpenProject,
 }: {
   onNewProject: () => void
+  onChangeLocation: () => void
+  recentProjects: RecentProject[]
+  onOpenProject: (project: RecentProject) => void
 }): ReactElement {
   const [files, setFiles] = useState<SidebarFile[]>([])
   const [activeFileId, setActiveFileId] = useState<number | null>(null)
@@ -324,6 +331,9 @@ function CATWorkspace({
           sourceLanguage="english"
           onFileSelect={setActiveFileId}
           onNewProject={onNewProject}
+          onChangeLocation={onChangeLocation}
+          recentProjects={recentProjects}
+          onOpenProject={onOpenProject}
         />
         <TranslationWorkspace
           blocks={blocks}
@@ -414,43 +424,73 @@ function CATWorkspace({
 function AppContent(): ReactElement {
   const [hasProject, setHasProject] = useState(false)
   const [isWizardOpen, setIsWizardOpen] = useState(false)
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
+  const [workspaceKey, setWorkspaceKey] = useState(0)
 
-  // Khởi động: check xem có project config nào trong DB không
+  // Khởi động: luôn vào Welcome, chỉ load danh sách recent
   useEffect(() => {
-    const checkProject = async (): Promise<void> => {
-      const project = await window.api.project.getCurrent()
-      setHasProject(!!project)
+    const loadRecent = async (): Promise<void> => {
+      try {
+        const recent = await window.api.project.getRecent()
+        setRecentProjects(recent)
+      } catch (err) {
+        console.error('Failed to load recent projects:', err)
+      }
     }
-    checkProject()
+    loadRecent()
   }, [])
 
-  if (!hasProject) {
-    return (
-      <TooltipProvider>
-        <WelcomeScreen
-          hasApiKey={false} // TODO: Đọc từ electron-store ở Phase 4E
-          recentProjects={[]}
-          onNewProject={() => setIsWizardOpen(true)}
-          onOpenProject={(project) => {
-            console.log('[TODO] Open project:', project)
-            setHasProject(true)
-          }}
-        />
-        <SetupWizardModal
-          open={isWizardOpen}
-          onOpenChange={setIsWizardOpen}
-          onComplete={(config) => {
-            console.log('[App] New project setup complete:', config)
-            setHasProject(true)
-          }}
-        />
-      </TooltipProvider>
-    )
+  const refreshRecent = async (): Promise<void> => {
+    try {
+      const recent = await window.api.project.getRecent()
+      setRecentProjects(recent)
+    } catch (err) {
+      console.error('Failed to refresh recent projects:', err)
+    }
+  }
+
+  const handleOpenProject = async (project: RecentProject): Promise<void> => {
+    try {
+      const { gameFolderPath, sourceLanguage, targetLanguage } = project
+      await window.api.project.setup({ gameFolderPath, sourceLanguage, targetLanguage })
+      await refreshRecent()
+      setHasProject(true)
+      setWorkspaceKey((prev) => prev + 1)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('Failed to open project:', message)
+      alert(message || 'Không thể mở project.')
+    }
   }
 
   return (
     <TooltipProvider>
-      <CATWorkspace onNewProject={() => setIsWizardOpen(true)} />
+      {hasProject ? (
+        <CATWorkspace
+          key={workspaceKey}
+          onNewProject={() => setIsWizardOpen(true)}
+          onChangeLocation={() => setIsWizardOpen(true)}
+          recentProjects={recentProjects}
+          onOpenProject={handleOpenProject}
+        />
+      ) : (
+        <WelcomeScreen
+          hasApiKey={false} // TODO: Đọc từ electron-store ở Phase 4E
+          recentProjects={recentProjects}
+          onNewProject={() => setIsWizardOpen(true)}
+          onOpenProject={handleOpenProject}
+        />
+      )}
+      <SetupWizardModal
+        open={isWizardOpen}
+        onOpenChange={setIsWizardOpen}
+        onComplete={(config) => {
+          void config
+          void refreshRecent()
+          setHasProject(true)
+          setWorkspaceKey((prev) => prev + 1)
+        }}
+      />
     </TooltipProvider>
   )
 }

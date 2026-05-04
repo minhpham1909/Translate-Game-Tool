@@ -58,11 +58,11 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
     setParseProgress(0)
   }
 
-  const handleBrowseFolder = (): void => {
-    // TODO: Gọi window.api.dialog.selectFolder() ở Phase 4E
-    // Tạm mock bằng prompt
-    const mockPath = 'D:\\Games\\MyVisualNovel\\game'
-    setGameFolderPath(mockPath)
+  const handleBrowseFolder = async (): Promise<void> => {
+    const selectedPath = await window.api.project.selectFolder()
+    if (selectedPath) {
+      setGameFolderPath(selectedPath)
+    }
   }
 
   const handleScanLanguages = async (): Promise<void> => {

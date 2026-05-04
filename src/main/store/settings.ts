@@ -1,11 +1,11 @@
 import Store from 'electron-store'
-import { AppSettings, ProjectConfig } from '../../shared/types'
+import { AppSettings, ProjectConfig, RecentProject } from '../../shared/types'
 
 const defaultSettings: AppSettings = {
   // Group 1
   apiKeys: {},
   activeProvider: 'gemini',
-  activeModelId: 'gemini-1.5-flash',
+  activeModelId: 'gemini-2.5-flash',
   customEndpoint: '',
 
   // Group 2
@@ -28,17 +28,18 @@ const defaultSettings: AppSettings = {
   autoSaveInterval: 5
 }
 
-// Khởi tạo electron-store. Data sẽ được lưu dưới dạng file JSON 
+// Khởi tạo electron-store. Data sẽ được lưu dưới dạng file JSON
 // trong thư mục AppData của hệ điều hành.
 // Xử lý ESM to CJS interop cho electron-store
-const StoreClass = ((Store && typeof Store !== 'function' && 'default' in Store) 
-  ? (Store as any).default 
+const StoreClass = ((Store && typeof Store !== 'function' && 'default' in Store)
+  ? (Store as any).default
   : Store) as typeof Store;
 
-const store = new StoreClass<{ settings: AppSettings, project: ProjectConfig | null }>({
+const store = new StoreClass<{ settings: AppSettings; project: ProjectConfig | null; recentProjects: RecentProject[] }>({
   defaults: {
     settings: defaultSettings,
-    project: null
+    project: null,
+    recentProjects: []
   }
 })
 
@@ -76,4 +77,33 @@ export function getProjectConfig(): ProjectConfig | null {
  */
 export function saveProjectConfig(project: ProjectConfig): void {
   store.set('project', project)
+}
+
+/**
+ * Lấy danh sách Recent Projects
+ */
+export function getRecentProjects(): RecentProject[] {
+  return store.get('recentProjects')
+}
+
+/**
+ * Lưu toàn bộ danh sách Recent Projects
+ */
+export function saveRecentProjects(projects: RecentProject[]): void {
+  store.set('recentProjects', projects)
+}
+
+/**
+ * Thêm/Cập nhật 1 recent project, đồng thời đưa lên đầu danh sách
+ */
+export function addRecentProject(project: ProjectConfig): RecentProject[] {
+  const nextEntry: RecentProject = {
+    ...project,
+    lastOpenedAt: new Date().toLocaleString('vi-VN')
+  }
+  const current = getRecentProjects()
+  const filtered = current.filter((p) => p.gameFolderPath !== project.gameFolderPath)
+  const updated = [nextEntry, ...filtered].slice(0, 8)
+  store.set('recentProjects', updated)
+  return updated
 }

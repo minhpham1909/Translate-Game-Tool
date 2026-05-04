@@ -1,5 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { ProjectConfig } from '../shared/types'
+import type { AppSettings, ProjectConfig, RecentProject } from '../shared/types'
 
 type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning'
 
@@ -78,6 +78,8 @@ declare global {
         scanLanguages: (gamePath: string) => Promise<string[]>
         setup: (config: ProjectConfig) => Promise<void>
         getCurrent: () => Promise<ProjectConfig | null>
+        selectFolder: () => Promise<string | null>
+        getRecent: () => Promise<RecentProject[]>
       }
       glossary: {
         getAll: () => Promise<GlossaryEntry[]>
@@ -111,6 +113,12 @@ declare global {
       events: {
         onSystemLog: (callback: (entry: SystemLogEntry) => void) => () => void
         onEngineProgress: (callback: (progress: EngineProgress) => void) => () => void
+      }
+      settings: {
+        get: () => Promise<AppSettings>
+        save: (settings: Partial<AppSettings>) => Promise<void>
+        testConnection: () => Promise<{ ok: boolean; error?: string }>
+        listModels: (provider?: string) => Promise<string[]>
       }
     }
   }

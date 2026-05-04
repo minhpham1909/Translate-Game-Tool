@@ -3,7 +3,7 @@
  * Modal cài đặt toàn cục, kết nối vào AppSettings.
  * Có 4 tab: AI & API, Prompt & Logic, Translation Memory, System.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bot, Wand2, Database, Settings2, Eye, EyeOff, Sun, Moon, Monitor } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { useTheme } from '@renderer/context/ThemeContext'
 import { cn } from '@renderer/lib/utils'
+import type { AIProvider, AppSettings } from '../../../../shared/types'
 
 type SettingsTab = 'ai-api' | 'prompt-logic' | 'translation-memory' | 'system'
 
@@ -42,9 +43,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const { theme, setTheme } = useTheme()
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai-api')
   const [showApiKey, setShowApiKey] = useState(false)
+  const [isTesting, setIsTesting] = useState(false)
+  const [apiKeys, setApiKeys] = useState<Partial<Record<AIProvider, string>>>({})
+  const [modelId, setModelId] = useState('gemini-1.5-flash')
+  const [availableModels, setAvailableModels] = useState<string[]>([])
 
   // AI & API
-  const [provider, setProvider] = useState('gemini')
+  const [provider, setProvider] = useState<AIProvider>('gemini')
   const [apiKey, setApiKey] = useState('')
   const [customEndpoint, setCustomEndpoint] = useState('')
   const [temperature, setTemperature] = useState([0.2])
@@ -58,6 +63,99 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   // Translation Memory
   const [enableAutoFill, setEnableAutoFill] = useState(true)
   const [fuzzyThreshold, setFuzzyThreshold] = useState([100])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void window.api.settings.get().then((settings) => {
+      if (cancelled) return
+      setProvider(settings.activeProvider || 'gemini')
+      setModelId(settings.activeModelId || 'gemini-1.5-flash')
+      setApiKeys(settings.apiKeys || {})
+      setApiKey(settings.apiKeys?.[settings.activeProvider] || '')
+      setCustomEndpoint(settings.customEndpoint || '')
+      setTemperature([settings.temperature ?? 0.2])
+      setTargetLanguage(settings.targetLanguage || 'Tiếng Việt')
+      setSystemPrompt(settings.userCustomPrompt || '')
+      setBatchSize(String(settings.batchSize ?? 20))
+      setConcurrentRequests(String(settings.concurrentRequests ?? 1))
+      setEnableAutoFill(settings.enableTranslationMemory ?? true)
+      setFuzzyThreshold([Math.round((settings.tmFuzzyThreshold ?? 1) * 100)])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void window.api.settings
+      .listModels(provider)
+      .then((models) => {
+        if (cancelled) return
+        setAvailableModels(models)
+        if (models.length > 0 && !models.includes(modelId)) {
+          setModelId(models[0])
+        }
+        if (models.length === 0) {
+          setModelId('')
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load models:', err)
+        if (!cancelled) setAvailableModels([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, provider])
+
+  const handleProviderChange = (value: string): void => {
+    const nextProvider = value as AIProvider
+    setProvider(nextProvider)
+    setApiKey(apiKeys[nextProvider] || '')
+  }
+
+  const handleApiKeyChange = (value: string): void => {
+    setApiKey(value)
+    setApiKeys((prev) => ({ ...prev, [provider]: value }))
+  }
+
+  const buildSettingsPayload = (): Partial<AppSettings> => ({
+    activeProvider: provider,
+    activeModelId: modelId,
+    apiKeys,
+    customEndpoint,
+    temperature: temperature[0],
+    targetLanguage,
+    userCustomPrompt: systemPrompt,
+    batchSize: Number(batchSize) || 20,
+    concurrentRequests: Number(concurrentRequests) || 1,
+    enableTranslationMemory: enableAutoFill,
+    tmFuzzyThreshold: (fuzzyThreshold[0] || 100) / 100,
+    theme,
+  })
+
+  const handleSave = async (): Promise<void> => {
+    await window.api.settings.save(buildSettingsPayload())
+    onOpenChange(false)
+  }
+
+  const handleTestConnection = async (): Promise<void> => {
+    setIsTesting(true)
+    try {
+      await window.api.settings.save(buildSettingsPayload())
+      const result = await window.api.settings.testConnection()
+      if (result.ok) {
+        alert('Connection OK')
+      } else {
+        alert(result.error || 'Connection failed')
+      }
+    } finally {
+      setIsTesting(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -99,7 +197,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="select-provider">Active Provider</Label>
-                    <Select value={provider} onValueChange={setProvider}>
+                    <Select value={provider} onValueChange={handleProviderChange}>
                       <SelectTrigger id="select-provider" className="w-full">
                         <SelectValue placeholder="Select provider" />
                       </SelectTrigger>
@@ -115,13 +213,34 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="select-model">Active Model</Label>
+                    <Select value={modelId} onValueChange={setModelId}>
+                      <SelectTrigger id="select-model" className="w-full">
+                        <SelectValue placeholder="Select model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableModels.length > 0 ? (
+                          availableModels.map((model) => (
+                            <SelectItem key={model} value={model}>
+                              {model}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value={modelId}>{modelId}</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Model ID must match the provider.</p>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="input-api-key">API Key</Label>
                     <div className="relative">
                       <Input
                         id="input-api-key"
                         type={showApiKey ? 'text' : 'password'}
                         value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
+                        onChange={(e) => handleApiKeyChange(e.target.value)}
                         placeholder="Nhập API key của bạn..."
                         className="pr-10"
                       />
@@ -152,7 +271,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   </div>
 
                   <div className="flex justify-start">
-                    <Button id="btn-test-connection" variant="outline" size="sm">
+                    <Button
+                      id="btn-test-connection"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTestConnection}
+                      disabled={isTesting}
+                    >
                       Test Connection
                     </Button>
                   </div>
@@ -328,7 +453,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
         {/* Modal Footer */}
         <DialogFooter className="px-6 py-4 border-t border-border bg-muted/30">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button id="btn-save-settings" onClick={() => onOpenChange(false)}>Save Changes</Button>
+          <Button id="btn-save-settings" onClick={handleSave}>Save Changes</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
