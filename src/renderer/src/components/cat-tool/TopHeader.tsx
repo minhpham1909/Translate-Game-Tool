@@ -5,7 +5,7 @@
  */
 import {
   BarChart3, Search, Settings, Download, ChevronRight, Folder,
-  Sun, Moon, Monitor, ShieldAlert, Database, BookMarked, Keyboard,
+  Sun, Moon, Monitor, ShieldAlert, Database, BookMarked, Keyboard, RefreshCw,
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -23,6 +23,7 @@ interface TopHeaderProps {
   onGlossaryClick: () => void
   onTMClick: () => void
   onShortcutsClick: () => void
+  onGameUpdateClick: () => void
 }
 
 /**
@@ -49,6 +50,7 @@ export function TopHeader({
   onGlossaryClick,
   onTMClick,
   onShortcutsClick,
+  onGameUpdateClick,
 }: TopHeaderProps) {
   const { theme, setTheme } = useTheme()
 
@@ -151,6 +153,16 @@ export function TopHeader({
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom"><p>Keyboard Shortcuts <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">F1</kbd></p></TooltipContent>
+          </Tooltip>
+
+          {/* Update Game */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-update-game" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onGameUpdateClick}>
+                <RefreshCw className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Update Game Project — preserve translations after game update</p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />

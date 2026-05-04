@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppSettings, ProjectConfig, RecentProject } from '../shared/types'
 
-type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning'
+type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning' | 'skipped' | 'modified'
 
 interface GlossaryEntry {
   id?: number
@@ -71,6 +71,41 @@ interface EngineProgress {
   error: number
 }
 
+interface CompiledScanResult {
+  rpaFiles: string[]
+  rpycFiles: string[]
+  rpyFiles: string[]
+  hasCompiled: boolean
+  hasSource: boolean
+}
+
+interface UnpackResult {
+  success: boolean
+  rpaExtracted: number
+  rpycDecompiled: number
+  failed: number
+  message: string
+}
+
+interface UnpackProgressEvent {
+  event: 'info' | 'progress' | 'error' | 'complete'
+  message?: string
+  detail?: string
+  current?: number
+  total?: number
+  percent?: number
+  files_processed?: number
+  files_failed?: number
+}
+
+interface DiffSummary {
+  unchanged: number
+  modified: number
+  newBlocks: number
+  removed: number
+  totalFiles: number
+}
+
 interface RendererApi {
   project: {
     scanLanguages: (gamePath: string) => Promise<string[]>
@@ -78,6 +113,16 @@ interface RendererApi {
     getCurrent: () => Promise<ProjectConfig | null>
     selectFolder: () => Promise<string | null>
     getRecent: () => Promise<RecentProject[]>
+    scanCompiled: (gameDir: string) => Promise<CompiledScanResult>
+    unpackGame: (gameDir: string, mode?: 'extract' | 'decompile' | 'auto') => Promise<UnpackResult>
+    installUnpackerDeps: () => Promise<{ success: boolean; message: string }>
+    previewDiff: (newGameDir: string, sourceLanguage: string) => Promise<{
+      newFileCount: number
+      existingFileCount: number
+      removedFileCount: number
+      totalNewRpyFiles: number
+    }>
+    updateGame: (newGameDir: string, sourceLanguage: string) => Promise<DiffSummary>
   }
   glossary: {
     getAll: () => Promise<GlossaryEntry[]>
@@ -99,6 +144,7 @@ interface RendererApi {
     getFiles: () => Promise<WorkspaceFile[]>
     getBlocks: (fileId: number) => Promise<WorkspaceBlock[]>
     updateBlock: (blockId: number, text: string | null, status: BlockStatus) => Promise<void>
+    batchApprove: (blockIds: number[]) => Promise<void>
   }
   engine: {
     preflight: (fileId?: number) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
@@ -109,6 +155,7 @@ interface RendererApi {
   events: {
     onSystemLog: (callback: (entry: SystemLogEntry) => void) => () => void
     onEngineProgress: (callback: (progress: EngineProgress) => void) => () => void
+    onUnpackProgress: (callback: (event: UnpackProgressEvent) => void) => () => void
   }
   settings: {
     get: () => Promise<AppSettings>
@@ -125,7 +172,21 @@ const api: RendererApi = {
     setup: (config: ProjectConfig) => ipcRenderer.invoke('project:setup', config) as Promise<void>,
     getCurrent: () => ipcRenderer.invoke('project:getCurrent') as Promise<ProjectConfig | null>,
     selectFolder: () => ipcRenderer.invoke('project:selectFolder') as Promise<string | null>,
-    getRecent: () => ipcRenderer.invoke('project:getRecent') as Promise<RecentProject[]>
+    getRecent: () => ipcRenderer.invoke('project:getRecent') as Promise<RecentProject[]>,
+    scanCompiled: (gameDir: string) => ipcRenderer.invoke('project:scanCompiled', gameDir) as Promise<CompiledScanResult>,
+    unpackGame: (gameDir: string, mode?: 'extract' | 'decompile' | 'auto') =>
+      ipcRenderer.invoke('project:unpackGame', gameDir, mode) as Promise<UnpackResult>,
+    installUnpackerDeps: () =>
+      ipcRenderer.invoke('project:installUnpackerDeps') as Promise<{ success: boolean; message: string }>,
+    previewDiff: (newGameDir: string, sourceLanguage: string) =>
+      ipcRenderer.invoke('project:previewDiff', newGameDir, sourceLanguage) as Promise<{
+        newFileCount: number
+        existingFileCount: number
+        removedFileCount: number
+        totalNewRpyFiles: number
+      }>,
+    updateGame: (newGameDir: string, sourceLanguage: string) =>
+      ipcRenderer.invoke('project:updateGame', newGameDir, sourceLanguage) as Promise<DiffSummary>
   },
   glossary: {
     getAll: () => ipcRenderer.invoke('glossary:getAll') as Promise<GlossaryEntry[]>,
@@ -149,7 +210,9 @@ const api: RendererApi = {
     getFiles: () => ipcRenderer.invoke('workspace:getFiles') as Promise<WorkspaceFile[]>,
     getBlocks: (fileId: number) => ipcRenderer.invoke('workspace:getBlocks', fileId) as Promise<WorkspaceBlock[]>,
     updateBlock: (blockId: number, text: string | null, status: BlockStatus) =>
-      ipcRenderer.invoke('workspace:updateBlock', blockId, text, status) as Promise<void>
+      ipcRenderer.invoke('workspace:updateBlock', blockId, text, status) as Promise<void>,
+    batchApprove: (blockIds: number[]) =>
+      ipcRenderer.invoke('workspace:batchApprove', blockIds) as Promise<void>
   },
   engine: {
     preflight: (fileId?: number) =>
@@ -173,6 +236,11 @@ const api: RendererApi = {
       const handler = (_: IpcRendererEvent, progress: EngineProgress): void => callback(progress)
       ipcRenderer.on('engine:progress', handler)
       return () => ipcRenderer.removeListener('engine:progress', handler)
+    },
+    onUnpackProgress: (callback: (event: UnpackProgressEvent) => void): (() => void) => {
+      const handler = (_: IpcRendererEvent, event: UnpackProgressEvent): void => callback(event)
+      ipcRenderer.on('unpack:progress', handler)
+      return () => ipcRenderer.removeListener('unpack:progress', handler)
     }
   },
   settings: {

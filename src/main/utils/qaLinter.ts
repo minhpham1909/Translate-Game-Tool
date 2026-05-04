@@ -69,3 +69,82 @@ export function validateTranslation(originalText: string, translatedText: string
 
   return errors
 }
+
+/**
+ * Text Overflow Check — warning when translated text is significantly longer than source.
+ * Vietnamese is typically 20-30% longer than English, which can cause UI overflow in games.
+ *
+ * @param originalText Source text
+ * @param translatedText Translated text
+ * @param maxRatio Maximum allowed length ratio (default 1.3 = 30% longer)
+ * @returns Array of warning strings. Empty if within threshold.
+ */
+export function validateLengthOverflow(
+  originalText: string,
+  translatedText: string,
+  maxRatio: number = 1.3
+): string[] {
+  const warnings: string[] = []
+  if (!originalText || !translatedText) return warnings
+
+  const origLen = originalText.length
+  const transLen = translatedText.length
+
+  if (origLen === 0) return warnings
+
+  const ratio = transLen / origLen
+  if (ratio > maxRatio) {
+    const pctIncrease = Math.round((ratio - 1) * 100)
+    warnings.push(
+      `Length overflow: translation is ${pctIncrease}% longer (${origLen} → ${transLen} chars). May overflow UI in game.`
+    )
+  }
+
+  return warnings
+}
+
+/**
+ * Glossary term record for verification.
+ */
+export interface GlossaryTerm {
+  source_text: string
+  target_text: string
+}
+
+/**
+ * Strict Glossary Verification — check that glossary terms found in the source
+ * are translated exactly as specified in the glossary.
+ *
+ * @param originalText Source text
+ * @param translatedText Translated text
+ * @param glossary All glossary entries
+ * @returns Array of error strings. Empty if all terms match.
+ */
+export function validateGlossary(
+  originalText: string,
+  translatedText: string,
+  glossary: GlossaryTerm[]
+): string[] {
+  const errors: string[] = []
+  if (glossary.length === 0) return errors
+
+  const sourceLower = originalText.toLowerCase()
+
+  for (const term of glossary) {
+    const sourceLowerTerm = term.source_text.toLowerCase()
+    const targetTerm = term.target_text
+
+    // Check if the source term appears in the original text
+    if (sourceLower.includes(sourceLowerTerm)) {
+      // Check if the target translation appears in the translated text
+      // Use case-insensitive match for flexibility
+      if (!translatedText.toLowerCase().includes(targetTerm.toLowerCase())) {
+        errors.push(
+          `Glossary violation: "${term.source_text}" must be translated as "${term.target_text}"`
+        )
+      }
+    }
+  }
+
+  return errors
+}

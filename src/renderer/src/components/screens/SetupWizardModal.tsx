@@ -5,8 +5,8 @@
  * Step 2: Chọn ngôn ngữ nguồn (scan từ game/tl/)
  * Step 3: Nhập ngôn ngữ đích + xác nhận parse
  */
-import { useState, type ReactElement } from 'react'
-import { Folder, ChevronRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useState, useEffect, type ReactElement } from 'react'
+import { Folder, ChevronRight, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@renderer/components/ui/dialog'
@@ -19,6 +19,7 @@ import { cn } from '@renderer/lib/utils'
 
 type WizardStep = 1 | 2 | 3
 type ParseStatus = 'idle' | 'parsing' | 'success' | 'error'
+type UnpackStatus = 'idle' | 'checking' | 'warning' | 'unpacking' | 'done' | 'error'
 
 interface SetupWizardModalProps {
   open: boolean
@@ -49,6 +50,35 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
   const [parseProgress, setParseProgress] = useState(0)
   const [parseMessage, setParseMessage] = useState('')
 
+  // Unpacker state
+  const [unpackStatus, setUnpackStatus] = useState<UnpackStatus>('idle')
+  const [unpackProgress, setUnpackProgress] = useState(0)
+  const [unpackMessage, setUnpackMessage] = useState('')
+  const [compiledInfo, setCompiledInfo] = useState<{
+    rpaCount: number
+    rpycCount: number
+    rpyCount: number
+  } | null>(null)
+
+  // Listen for unpack progress events
+  useEffect(() => {
+    if (!open) return
+    const cleanup = window.api.events.onUnpackProgress((event) => {
+      if (event.event === 'progress' && event.total) {
+        setUnpackProgress(event.percent ?? 0)
+        setUnpackMessage(event.message ?? '')
+      } else if (event.event === 'info') {
+        setUnpackMessage(event.message ?? '')
+      } else if (event.event === 'complete') {
+        setUnpackProgress(100)
+        setUnpackMessage(`Done: ${(event.files_processed ?? 0)} processed, ${(event.files_failed ?? 0)} failed`)
+      } else if (event.event === 'error') {
+        setUnpackMessage(event.message ?? 'Unpack error')
+      }
+    })
+    return cleanup
+  }, [open])
+
   const resetWizard = (): void => {
     setCurrentStep(1)
     setGameFolderPath('')
@@ -56,12 +86,65 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
     setTargetLanguage('vietnamese')
     setParseStatus('idle')
     setParseProgress(0)
+    setUnpackStatus('idle')
+    setUnpackProgress(0)
+    setUnpackMessage('')
+    setCompiledInfo(null)
   }
 
   const handleBrowseFolder = async (): Promise<void> => {
     const selectedPath = await window.api.project.selectFolder()
     if (selectedPath) {
       setGameFolderPath(selectedPath)
+      await scanCompiledFiles(selectedPath)
+    }
+  }
+
+  const scanCompiledFiles = async (folderPath: string): Promise<void> => {
+    setUnpackStatus('checking')
+    setCompiledInfo(null)
+    try {
+      const result = await window.api.project.scanCompiled(folderPath)
+      setCompiledInfo({
+        rpaCount: result.rpaFiles.length,
+        rpycCount: result.rpycFiles.length,
+        rpyCount: result.rpyFiles.length,
+      })
+      if (result.hasCompiled && !result.hasSource) {
+        setUnpackStatus('warning')
+      } else if (result.hasCompiled && result.hasSource) {
+        setUnpackStatus('idle') // Has both — show info but let user proceed
+      } else {
+        setUnpackStatus('idle')
+      }
+    } catch {
+      setUnpackStatus('idle')
+    }
+  }
+
+  const handleUnpack = async (): Promise<void> => {
+    setUnpackStatus('unpacking')
+    setUnpackProgress(0)
+    setUnpackMessage('Starting unpacker...')
+
+    try {
+      // First try to install unrpyc for better decompilation
+      await window.api.project.installUnpackerDeps()
+
+      const result = await window.api.project.unpackGame(gameFolderPath, 'auto')
+      if (result.success) {
+        setUnpackStatus('done')
+        setUnpackMessage(result.message)
+        // Re-scan after unpack
+        await scanCompiledFiles(gameFolderPath)
+      } else {
+        setUnpackStatus('error')
+        setUnpackMessage(result.message)
+      }
+    } catch (err: unknown) {
+      setUnpackStatus('error')
+      const message = err instanceof Error ? err.message : String(err)
+      setUnpackMessage(message)
     }
   }
 
@@ -170,6 +253,84 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
                   Trỏ đến thư mục <code className="font-mono bg-muted px-1 rounded text-[11px]">game/</code> trong thư mục game.
                 </p>
               </div>
+
+              {/* Compiled File Warning + Unpacker UI */}
+              {unpackStatus === 'checking' && (
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-muted/30">
+                  <Loader2 className="size-4 text-muted-foreground animate-spin" />
+                  <span className="text-xs text-muted-foreground">Scanning for compiled files...</span>
+                </div>
+              )}
+
+              {unpackStatus === 'warning' && compiledInfo && (
+                <div className="space-y-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="size-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-amber-500">Compiled game detected</p>
+                      <p className="text-xs text-muted-foreground">
+                        This game uses compiled files ({compiledInfo.rpaCount} .rpa, {compiledInfo.rpycCount} .rpyc) with no source .rpy files.
+                        You need to unpack them before translating.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    id="btn-unpack-game"
+                    size="sm"
+                    className="w-full gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
+                    onClick={handleUnpack}
+                  >
+                    <Package className="size-3.5" />
+                    Unpack Game First
+                  </Button>
+                </div>
+              )}
+
+              {unpackStatus === 'unpacking' && (
+                <div className="space-y-2 p-3 rounded-lg border border-primary/30 bg-primary/5">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="size-4 text-primary animate-spin" />
+                    <span className="text-xs text-foreground">{unpackMessage || 'Unpacking...'}</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-300 rounded-full"
+                      style={{ width: `${Math.min(unpackProgress, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {unpackStatus === 'done' && (
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-success/30 bg-success/5">
+                  <CheckCircle2 className="size-4 text-success" />
+                  <span className="text-xs text-success">{unpackMessage}</span>
+                </div>
+              )}
+
+              {unpackStatus === 'error' && (
+                <div className="p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="size-4 text-destructive mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-destructive">Unpack failed</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{unpackMessage}</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Tip: Install Python 3.x and run <code className="font-mono bg-muted px-1 rounded">pip install unrpyc</code> for best results.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {unpackStatus === 'idle' && compiledInfo && compiledInfo.rpaCount + compiledInfo.rpycCount > 0 && (
+                <div className="flex items-center gap-2 p-2 rounded-lg border border-border/50 bg-muted/20">
+                  <Package className="size-3.5 text-muted-foreground" />
+                  <span className="text-[11px] text-muted-foreground">
+                    Found {compiledInfo.rpaCount} archive(s), {compiledInfo.rpycCount} compiled script(s), {compiledInfo.rpyCount} source file(s).
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

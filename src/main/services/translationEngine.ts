@@ -1,9 +1,13 @@
 import { getDatabase } from '../store/database'
-import { AIService } from '../api/aiService'
+import { AIService, type ContextBlock } from '../api/aiService'
 import { TranslationBlock } from '../../shared/types'
-import { getSettings } from '../store/settings'
-import { validateTranslation } from '../utils/qaLinter'
+import { getSettings, getActiveProviderConfig } from '../store/settings'
+import { validateTranslation, validateGlossary, validateLengthOverflow, type GlossaryTerm } from '../utils/qaLinter'
 import { emitEngineProgress, emitSystemLog } from '../utils/ipcBroadcast'
+import { RateLimitError, TokenLimitError, ParsingError, APIError, normalizeError } from '../api/errors'
+import { filterBlacklist } from '../utils/regexBlacklist'
+import { filterSmartGlossary, formatGlossaryForPrompt } from '../utils/smartGlossary'
+import { shouldRetry, categorizeErrors } from '../utils/selfCorrection'
 
 type Db = ReturnType<typeof getDatabase>
 
@@ -52,12 +56,75 @@ function updateFileStats(db: Db, fileId: number): void {
   ).run(stats.total, stats.translated, status, fileId)
 }
 
-function buildGlossaryText(db: Db): string {
+function buildSmartGlossary(db: Db, batchTexts: string[], enabled: boolean): string {
   const glossaries = db
     .prepare(`SELECT source_text, target_text FROM glossaries`)
     .all() as { source_text: string; target_text: string }[]
+
   if (glossaries.length === 0) return ''
-  return glossaries.map((g) => `${g.source_text} = ${g.target_text}`).join('\n')
+
+  if (!enabled || glossaries.length <= 5) {
+    return formatGlossaryForPrompt(glossaries)
+  }
+
+  const relevant = filterSmartGlossary(glossaries, batchTexts)
+  return formatGlossaryForPrompt(relevant)
+}
+
+function getRelevantGlossary(db: Db, batchTexts: string[], smartEnabled: boolean): GlossaryTerm[] {
+  const all = db
+    .prepare(`SELECT source_text, target_text FROM glossaries`)
+    .all() as GlossaryTerm[]
+
+  if (all.length === 0) return []
+  if (!smartEnabled || all.length <= 5) return all
+
+  const relevant = filterSmartGlossary(all, batchTexts)
+  return relevant
+}
+
+/**
+ * Fetch previous translated blocks as conversation context.
+ * Returns up to `windowSize` blocks before the current batch, ordered by line_index.
+ */
+function getContextBlocks(db: Db, fileId: number, firstLineIndex: number, windowSize: number): ContextBlock[] {
+  if (windowSize <= 0) return []
+
+  const blocks = db
+    .prepare(
+      `
+    SELECT character_id, original_text, translated_text
+    FROM translation_blocks
+    WHERE file_id = ? AND line_index < ? AND status != 'empty' AND translated_text IS NOT NULL
+    ORDER BY line_index DESC
+    LIMIT ?
+  `
+    )
+    .all(fileId, firstLineIndex, windowSize) as Array<{
+      character_id: string | null
+      original_text: string
+      translated_text: string | null
+    }>
+
+  // Reverse to get chronological order (oldest first)
+  return blocks.reverse().map((b) => ({
+    character: b.character_id,
+    original: b.original_text,
+    translated: b.translated_text!,
+  }))
+}
+
+/**
+ * Get the current provider name for the translated_by field
+ */
+function getProviderName(): string {
+  const { providerId } = getActiveProviderConfig()
+  switch (providerId) {
+    case 'gemini': return 'gemini'
+    case 'claude': return 'claude'
+    case 'openai_compatible': return 'openai_compatible'
+    default: return providerId
+  }
 }
 
 export async function translateBatchByBlockIds(blockIds: number[]): Promise<void> {
@@ -66,8 +133,8 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
 
   const db = getDatabase()
   const settings = getSettings()
-  const glossaryText = buildGlossaryText(db)
   const fileIdsTouched = new Set<number>()
+  const providerName = getProviderName()
 
   const placeholders = uniqueIds.map(() => '?').join(',')
   const selectedBlocks = db
@@ -77,6 +144,31 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
   if (selectedBlocks.length === 0) return
 
   emitSystemLog('info', `[AI] Translating ${selectedBlocks.length} selected block(s)...`)
+
+  // Regex Blacklist: auto-skip non-translatable strings
+  const enableBlacklist = settings.enableRegexBlacklist !== false
+  const blacklistPatterns = settings.regexBlacklist || []
+  let skippedCount = 0
+
+  if (enableBlacklist && blacklistPatterns.length > 0) {
+    const stmtMarkSkipped = db.prepare(
+      `UPDATE translation_blocks SET translated_text = original_text, translated_by = 'blacklist', status = 'skipped' WHERE id = ?`
+    )
+    for (const block of selectedBlocks) {
+      const blockId = block.id as number | undefined
+      if (!blockId) continue
+      if (block.status !== 'empty') continue // Only skip empty blocks
+      const reason = filterBlacklist([block.original_text], blacklistPatterns).skipped[0]
+      if (reason) {
+        stmtMarkSkipped.run(blockId)
+        skippedCount++
+        emitSystemLog('info', `[Blacklist] Skipped: "${block.original_text.substring(0, 50)}" (${reason.reason})`)
+      }
+    }
+    if (skippedCount > 0) {
+      emitSystemLog('info', `[Blacklist] Skipped ${skippedCount} block(s) matching filter patterns.`)
+    }
+  }
 
   const textsToTranslate: string[] = []
   const blockMapping: { [index: number]: TranslationBlock } = {}
@@ -123,13 +215,134 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
     }
   })()
 
-  // Phase 2: AI call for TM misses
+  // Phase 2: AI call for TM misses (with self-correction retry)
   if (textsToTranslate.length > 0) {
-    const translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText)
+    const enableSmartGlossary = settings.enableSmartGlossary !== false
+    const glossaryText = buildSmartGlossary(db, textsToTranslate, enableSmartGlossary)
+
+    // Context Windowing: fetch previous translated blocks as conversation context
+    const contextWindowSize = settings.contextWindowSize || 0
+    const firstBlock = selectedBlocks.find((b) => b.status !== 'skipped' && blockMapping[0]?.id === b.id) || blockMapping[0]
+    const fileId = firstBlock?.file_id ?? 0
+    const firstLineIndex = blockMapping[0]?.line_index ?? 0
+    const contextHistory = fileId > 0
+      ? getContextBlocks(db, fileId, firstLineIndex, contextWindowSize)
+      : []
+    if (contextHistory.length > 0) {
+      emitSystemLog('info', `[Context] Injecting ${contextHistory.length} block(s) of conversation history`)
+    }
+
+    let translatedTexts: string[]
+    try {
+      translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText, contextHistory)
+    } catch (err) {
+      const normalized = normalizeError(err)
+      const message = normalized.message
+      console.error(`[AI] Translation failed:`, message)
+      emitSystemLog('error', `[AI] Translation failed: ${message}`)
+      throw normalized
+    }
+
     if (translatedTexts.length !== textsToTranslate.length) {
       throw new Error(
         `Độ dài mảng output JSON (${translatedTexts.length}) không khớp với input (${textsToTranslate.length})`
       )
+    }
+
+    // Phase 3: Linter + Glossary check + progressive self-correction retry
+    const enableSelfCorrection = settings.enableSelfCorrection !== false
+    const enableStrictGlossary = settings.enableStrictGlossary !== false
+    const maxRetries = Math.min(3, Math.max(1, settings.maxRetryAttempts || 2))
+    const relevantGlossary = enableStrictGlossary
+      ? getRelevantGlossary(db, textsToTranslate, settings.enableSmartGlossary !== false)
+      : []
+    const blocksNeedingRetry: number[] = []
+    const retryErrors: { [index: number]: string[] } = {}
+    const finalTranslations: { [index: number]: string } = {}
+
+    for (let i = 0; i < translatedTexts.length; i++) {
+      const block = blockMapping[i]
+      const blockId = block?.id as number | undefined
+      if (!blockId) continue
+
+      const errors = validateTranslation(block.original_text, translatedTexts[i])
+      if (enableStrictGlossary && relevantGlossary.length > 0) {
+        const glossaryErrors = validateGlossary(block.original_text, translatedTexts[i], relevantGlossary)
+        errors.push(...glossaryErrors)
+      }
+      if (shouldRetry(errors) && enableSelfCorrection) {
+        blocksNeedingRetry.push(i)
+        retryErrors[i] = errors
+      } else {
+        finalTranslations[i] = translatedTexts[i]
+      }
+    }
+
+    // Progressive self-correction retry (up to maxRetries)
+    if (blocksNeedingRetry.length > 0) {
+      emitSystemLog('warning', `[Self-Correct] ${blocksNeedingRetry.length} block(s) need correction`)
+
+      let currentRetryTexts = blocksNeedingRetry.map(i => textsToTranslate[i])
+      let currentRetryTranslations = translatedTexts.filter((_, i) => blocksNeedingRetry.includes(i))
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const remainingIndices: number[] = []
+        const remainingTexts: string[] = []
+        const remainingBadTranslations: string[] = []
+        const remainingErrors: string[][] = []
+
+        for (let j = 0; j < currentRetryTexts.length; j++) {
+          const origIdx = blocksNeedingRetry[j]
+          const block = blockMapping[origIdx]
+          if (!block?.id) continue
+
+          const errors = validateTranslation(block.original_text, currentRetryTranslations[j])
+          if (enableStrictGlossary && relevantGlossary.length > 0) {
+            const glossaryErrors = validateGlossary(block.original_text, currentRetryTranslations[j], relevantGlossary)
+            errors.push(...glossaryErrors)
+          }
+          if (errors.length > 0) {
+            remainingIndices.push(origIdx)
+            remainingTexts.push(currentRetryTexts[j])
+            remainingBadTranslations.push(currentRetryTranslations[j])
+            remainingErrors.push(errors)
+          } else {
+            finalTranslations[origIdx] = currentRetryTranslations[j]
+          }
+        }
+
+        if (remainingIndices.length === 0) break
+
+        const { summary } = categorizeErrors(remainingErrors.flat())
+        emitSystemLog('info', `[Self-Correct] Attempt ${attempt + 1}/${maxRetries} — fixing ${remainingIndices.length} block(s) (${summary})`)
+
+        try {
+          const newTranslations = await AIService.translateBatchWithRetry(
+            remainingTexts,
+            glossaryText,
+            remainingErrors.flat(),
+            attempt
+          )
+
+          currentRetryTexts = remainingTexts
+          currentRetryTranslations = newTranslations
+        } catch (retryErr) {
+          console.error(`[Self-Correct] Attempt ${attempt + 1} failed:`, retryErr)
+          emitSystemLog('warning', `[Self-Correct] Attempt ${attempt + 1} failed, using best available`)
+          for (let j = 0; j < remainingIndices.length; j++) {
+            finalTranslations[remainingIndices[j]] = currentRetryTranslations[j]
+          }
+          break
+        }
+      }
+
+      // Save final attempt results
+      for (let j = 0; j < currentRetryTexts.length; j++) {
+        const origIdx = blocksNeedingRetry[j]
+        if (finalTranslations[origIdx] === undefined) {
+          finalTranslations[origIdx] = currentRetryTranslations[j]
+        }
+      }
     }
 
     const stmtInsertTM = enableTM
@@ -144,14 +357,28 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
 
     db.transaction(() => {
       for (let i = 0; i < translatedTexts.length; i++) {
-        const translated = translatedTexts[i]
+        const translated = finalTranslations[i]
         const block = blockMapping[i]
         const blockId = block?.id as number | undefined
         if (!blockId) continue
+
+        // Re-run linter on final translation
         const errors = validateTranslation(block.original_text, translated)
+
+        // Length overflow check (warning only, not a self-correction trigger)
+        const enableLengthCheck = settings.enableLengthCheck !== false
+        const maxLengthRatio = settings.maxLengthRatio || 1.3
+        if (enableLengthCheck) {
+          const overflowWarnings = validateLengthOverflow(block.original_text, translated, maxLengthRatio)
+          if (overflowWarnings.length > 0) {
+            console.log(`[Overflow] Block ${blockId}: ${overflowWarnings[0]}`)
+          }
+          errors.push(...overflowWarnings)
+        }
+
         const status = errors.length > 0 ? 'warning' : 'draft'
 
-        stmtUpdateBlock.run(translated, settings.activeProvider, status, blockId)
+        stmtUpdateBlock.run(translated, providerName, status, blockId)
         if (enableTM && stmtInsertTM) stmtInsertTM.run(block.original_text, translated)
       }
     })()
@@ -167,7 +394,6 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
 
 /**
  * Tính năng Pre-flight Analyzer
- * Ước tính trước số lượng Token / Character cần dịch để user cân nhắc chi phí API.
  */
 export async function preFlightAnalyzer(
   fileId?: number
@@ -196,7 +422,6 @@ export async function preFlightAnalyzer(
   return {
     pendingBlocks: row.blockCount || 0,
     estimatedCharacters: row.charCount || 0,
-    // Pricing differs per provider/model; keep a conservative placeholder for now.
     estimatedCost: 0,
   }
 }
@@ -204,6 +429,7 @@ export async function preFlightAnalyzer(
 /**
  * Trình chạy nền (Background Worker Queue)
  * Fetch các dòng 'empty' -> Kiểm tra TM -> Gọi AI -> Lưu DB
+ * Với normalized error handling.
  */
 export async function startBackgroundQueue(
   onProgress?: (progress: { success: number; error: number }) => void,
@@ -215,9 +441,11 @@ export async function startBackgroundQueue(
   let hasMore = true
   let totalSuccess = 0
   let totalError = 0
+  let effectiveBatchSize = batchSize
   const enableTM = settings.enableTranslationMemory !== false
   const fileId = options?.fileId
   const signal = options?.signal
+  const providerName = getProviderName()
 
   while (hasMore) {
     if (signal?.aborted) {
@@ -225,7 +453,7 @@ export async function startBackgroundQueue(
       break
     }
 
-    // 1. Lấy ra N blocks đang chờ dịch (status = 'empty')
+    // 1. Lấy ra N blocks đang chờ dịch
     const pendingBlocks = fileId
       ? (db
           .prepare(
@@ -235,7 +463,7 @@ export async function startBackgroundQueue(
         LIMIT ?
       `
           )
-          .all(fileId, batchSize) as TranslationBlock[])
+          .all(fileId, effectiveBatchSize) as TranslationBlock[])
       : (db
           .prepare(
             `
@@ -244,7 +472,7 @@ export async function startBackgroundQueue(
         LIMIT ?
       `
           )
-          .all(batchSize) as TranslationBlock[])
+          .all(effectiveBatchSize) as TranslationBlock[])
 
     if (pendingBlocks.length === 0) {
       console.log('[Queue] All batches completed.')
@@ -256,10 +484,35 @@ export async function startBackgroundQueue(
     const textsToTranslate: string[] = []
     const blockMapping: { [index: number]: TranslationBlock } = {}
 
-    // 2. Tải toàn bộ Từ Điển (Glossary) từ DB
-    const glossaryText = buildGlossaryText(db)
+    // Regex Blacklist: auto-skip non-translatable strings
+    const enableBlacklist = settings.enableRegexBlacklist !== false
+    const blacklistPatterns = settings.regexBlacklist || []
+    let batchSkippedCount = 0
+    let activeBlocks = pendingBlocks
 
-    // 3. Chuẩn bị Statement
+    if (enableBlacklist && blacklistPatterns.length > 0) {
+      const stmtMarkSkipped = db.prepare(
+        `UPDATE translation_blocks SET translated_text = original_text, translated_by = 'blacklist', status = 'skipped' WHERE id = ?`
+      )
+      activeBlocks = pendingBlocks.filter((block) => {
+        const reason = filterBlacklist([block.original_text], blacklistPatterns).skipped[0]
+        if (reason) {
+          const blockId = block.id as number | undefined
+          if (blockId) {
+            stmtMarkSkipped.run(blockId)
+            batchSkippedCount++
+            totalSuccess++
+          }
+          return false
+        }
+        return true
+      })
+
+      if (batchSkippedCount > 0) {
+        emitSystemLog('info', `[Blacklist] Skipped ${batchSkippedCount} block(s) in this batch.`)
+      }
+    }
+
     const stmtCheckTM = enableTM
       ? db.prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
       : null
@@ -273,10 +526,10 @@ export async function startBackgroundQueue(
       : null
     const fileIdsTouched = new Set<number>()
 
-    // Giai đoạn 1: Lọc qua TM để tiết kiệm API
+    // Giai đoạn 1: Lọc qua TM
     db.transaction(() => {
-      for (let i = 0; i < pendingBlocks.length; i++) {
-        const block = pendingBlocks[i]
+      for (let i = 0; i < activeBlocks.length; i++) {
+        const block = activeBlocks[i]
         if (block.file_id) fileIdsTouched.add(block.file_id)
 
         const blockId = block.id as number | undefined
@@ -287,7 +540,6 @@ export async function startBackgroundQueue(
           : undefined
 
         if (tmRecord) {
-          // TM hit! Kéo qua linter kiểm tra lại cho chắc
           const errors = validateTranslation(block.original_text, tmRecord.translated_text)
           const status = errors.length > 0 ? 'warning' : 'draft'
 
@@ -295,20 +547,18 @@ export async function startBackgroundQueue(
           if (enableTM && stmtUpdateTMUsage) stmtUpdateTMUsage.run(block.original_text)
           totalSuccess++
         } else {
-          // TM miss! Cần gửi lên AI
           textsToTranslate.push(block.original_text)
           blockMapping[textsToTranslate.length - 1] = block
         }
       }
 
-      // Sync sidebar stats for TM hits
       for (const fid of fileIdsTouched) updateFileStats(db, fid)
-    })() // Execute transaction ngay lập tức
+    })()
 
     if (onProgress) onProgress({ success: totalSuccess, error: totalError })
     emitEngineProgress({ success: totalSuccess, error: totalError })
 
-    // 3. Nếu vẫn còn text chưa có trong TM, gọi AI
+    // 2. Gọi AI nếu còn text
     if (textsToTranslate.length > 0) {
       let attempts = 0
       let success = false
@@ -318,49 +568,155 @@ export async function startBackgroundQueue(
           console.log(`[Queue] Calling AI for ${textsToTranslate.length} line(s)...`)
           emitSystemLog('info', `[Queue] Calling AI for ${textsToTranslate.length} line(s)...`)
 
-          // Truyền từ điển đã parse vào
-          const translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText)
+          const enableSmartGlossary = settings.enableSmartGlossary !== false
+          const glossaryText = buildSmartGlossary(db, textsToTranslate, enableSmartGlossary)
 
-           if (translatedTexts.length !== textsToTranslate.length) {
-             throw new Error(`JSON output length (${translatedTexts.length}) does not match input (${textsToTranslate.length})`)
-           }
+          // Context Windowing
+          const contextWindowSize = settings.contextWindowSize || 0
+          const contextHistory = fileId && blockMapping[0]
+            ? getContextBlocks(db, fileId, blockMapping[0].line_index, contextWindowSize)
+            : []
 
-          // 4. Lưu kết quả API vào DB & Cập nhật TM
+          const translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText, contextHistory)
+
+          if (translatedTexts.length !== textsToTranslate.length) {
+            throw new Error(`JSON output length (${translatedTexts.length}) does not match input (${textsToTranslate.length})`)
+          }
+
+          // Linter + Glossary + progressive self-correction retry
+          const enableSelfCorrection = settings.enableSelfCorrection !== false
+          const enableStrictGlossary = settings.enableStrictGlossary !== false
+          const maxRetries = Math.min(3, Math.max(1, settings.maxRetryAttempts || 2))
+          const relevantGlossary = enableStrictGlossary
+            ? getRelevantGlossary(db, textsToTranslate, enableSmartGlossary)
+            : []
+          const blocksNeedingRetry: number[] = []
+          const retryErrors: { [index: number]: string[] } = {}
+          const finalTranslations: { [index: number]: string } = {}
+
+          for (let i = 0; i < translatedTexts.length; i++) {
+            const block = blockMapping[i]
+            if (!block?.id) { finalTranslations[i] = translatedTexts[i]; continue }
+            const errors = validateTranslation(block.original_text, translatedTexts[i])
+            if (enableStrictGlossary && relevantGlossary.length > 0) {
+              const glossaryErrors = validateGlossary(block.original_text, translatedTexts[i], relevantGlossary)
+              errors.push(...glossaryErrors)
+            }
+            if (shouldRetry(errors) && enableSelfCorrection) {
+              blocksNeedingRetry.push(i)
+              retryErrors[i] = errors
+            } else {
+              finalTranslations[i] = translatedTexts[i]
+            }
+          }
+
+          if (blocksNeedingRetry.length > 0) {
+            emitSystemLog('warning', `[Self-Correct] ${blocksNeedingRetry.length} block(s) need correction`)
+
+            let currentRetryTexts = blocksNeedingRetry.map(i => textsToTranslate[i])
+            let currentRetryTranslations = translatedTexts.filter((_, i) => blocksNeedingRetry.includes(i))
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+              const remainingIndices: number[] = []
+              const remainingTexts: string[] = []
+              const remainingBadTranslations: string[] = []
+              const remainingErrors: string[][] = []
+
+              for (let j = 0; j < currentRetryTexts.length; j++) {
+                const origIdx = blocksNeedingRetry[j]
+                const block = blockMapping[origIdx]
+                if (!block?.id) continue
+
+                const errors = validateTranslation(block.original_text, currentRetryTranslations[j])
+                if (enableStrictGlossary && relevantGlossary.length > 0) {
+                  const glossaryErrors = validateGlossary(block.original_text, currentRetryTranslations[j], relevantGlossary)
+                  errors.push(...glossaryErrors)
+                }
+                if (errors.length > 0) {
+                  remainingIndices.push(origIdx)
+                  remainingTexts.push(currentRetryTexts[j])
+                  remainingBadTranslations.push(currentRetryTranslations[j])
+                  remainingErrors.push(errors)
+                } else {
+                  finalTranslations[origIdx] = currentRetryTranslations[j]
+                }
+              }
+
+              if (remainingIndices.length === 0) break
+
+              const { summary } = categorizeErrors(remainingErrors.flat())
+              emitSystemLog('info', `[Self-Correct] Attempt ${attempt + 1}/${maxRetries} — fixing ${remainingIndices.length} block(s) (${summary})`)
+
+              try {
+                const newTranslations = await AIService.translateBatchWithRetry(
+                  remainingTexts,
+                  glossaryText,
+                  remainingErrors.flat(),
+                  attempt
+                )
+                currentRetryTranslations = newTranslations
+              } catch {
+                emitSystemLog('warning', `[Self-Correct] Attempt ${attempt + 1} failed`)
+                for (let j = 0; j < remainingIndices.length; j++) {
+                  finalTranslations[remainingIndices[j]] = currentRetryTranslations[j]
+                }
+                break
+              }
+            }
+
+            // Save final attempt results
+            for (let j = 0; j < blocksNeedingRetry.length; j++) {
+              const origIdx = blocksNeedingRetry[j]
+              if (finalTranslations[origIdx] === undefined) {
+                finalTranslations[origIdx] = currentRetryTranslations[j]
+              }
+            }
+          }
+
           const stmtInsertTM = enableTM
             ? db.prepare(`
-              INSERT INTO translation_memory (original_text, translated_text)
-              VALUES (?, ?)
-              ON CONFLICT(original_text) DO NOTHING
-            `)
+                INSERT INTO translation_memory (original_text, translated_text)
+                VALUES (?, ?)
+                ON CONFLICT(original_text) DO NOTHING
+              `)
             : null
 
           db.transaction(() => {
             for (let i = 0; i < translatedTexts.length; i++) {
-              const translated = translatedTexts[i]
+              const translated = finalTranslations[i]
               const block = blockMapping[i]
               const blockId = block?.id as number | undefined
               if (!blockId) continue
 
-              // Chạy qua Linter để bắt lỗi mất Tag/Biến
               const errors = validateTranslation(block.original_text, translated)
+
+              // Length overflow check (warning only)
+              const enableLengthCheck = settings.enableLengthCheck !== false
+              const maxLengthRatio = settings.maxLengthRatio || 1.3
+              if (enableLengthCheck) {
+                const overflowWarnings = validateLengthOverflow(block.original_text, translated, maxLengthRatio)
+                if (overflowWarnings.length > 0) {
+                  console.log(`[Overflow] Block ${blockId}: ${overflowWarnings[0]}`)
+                }
+                errors.push(...overflowWarnings)
+              }
+
               const status = errors.length > 0 ? 'warning' : 'draft'
 
               if (errors.length > 0) {
                 console.log(`[Linter] Warnings at block ${block.id}:`, errors)
               }
 
-              stmtUpdateBlock.run(translated, settings.activeProvider, status, blockId)
+              stmtUpdateBlock.run(translated, providerName, status, blockId)
               if (enableTM && stmtInsertTM) stmtInsertTM.run(block.original_text, translated)
               totalSuccess++
             }
 
-            // Sync sidebar stats
             for (const fid of fileIdsTouched) updateFileStats(db, fid)
           })()
 
           success = true
 
-          // Phát event ra UI
           if (onProgress) onProgress({ success: totalSuccess, error: totalError })
           emitEngineProgress({ success: totalSuccess, error: totalError })
           emitSystemLog('success', `[Queue] Batch done. success=${totalSuccess}, error=${totalError}`)
@@ -368,32 +724,41 @@ export async function startBackgroundQueue(
         } catch (error: unknown) {
           attempts++
           totalError++
-          const message = error instanceof Error ? error.message : String(error)
-          console.error(`[Queue] API error (attempt ${attempts}):`, message)
-          emitSystemLog('error', `[Queue] API error (attempt ${attempts}): ${message}`)
+          const normalized = normalizeError(error)
+          const message = normalized.message
 
-          // Xử lý Rate Limit (HTTP 429) bằng Exponential Backoff
-          const maybeStatus =
-            typeof error === 'object' && error !== null && 'status' in error
-              ? (error as { status?: unknown }).status
-              : undefined
-          const status = typeof maybeStatus === 'number' ? maybeStatus : undefined
-          if (status === 429 || message.includes('429')) {
-             const waitTime = Math.pow(2, attempts) * 1000 // 2s -> 4s -> 8s
-             console.log(`[Queue] Rate limited. Waiting ${waitTime}ms before retry...`)
-             await delay(waitTime, signal)
+          console.error(`[Queue] Error (attempt ${attempts}): ${normalized.name} — ${message}`)
+          emitSystemLog('error', `[Queue] ${normalized.name} (attempt ${attempts}): ${message}`)
+
+          if (normalized instanceof RateLimitError) {
+            const waitTime = normalized.retryAfterMs || Math.pow(2, attempts) * 1000
+            console.log(`[Queue] Rate limited. Waiting ${waitTime}ms...`)
+            await delay(waitTime, signal)
+          } else if (normalized instanceof TokenLimitError) {
+            // Reduce batch size and retry
+            effectiveBatchSize = Math.max(1, Math.floor(effectiveBatchSize / 2))
+            emitSystemLog('warning', `[Queue] Token limit. Reducing batch size to ${effectiveBatchSize}`)
+            await delay(2000, signal)
+          } else if (normalized instanceof ParsingError) {
+            // Retry — might be a fluke with the model
+            await delay(1000, signal)
+          } else if (normalized instanceof APIError && normalized.statusCode === 401) {
+            // Auth error — fatal
+            console.error('[Queue] Auth failed. Stopping queue.')
+            emitSystemLog('error', '[Queue] Invalid API key. Stopping queue.')
+            hasMore = false
+            break
           } else {
-             // Lỗi nghiêm trọng (sai API Key, mất mạng), tạm dừng toàn bộ queue
-             console.error('[Queue] Fatal error. Stopping queue.')
-             emitSystemLog('error', `[Queue] Fatal error. Stopping queue.`)
-             hasMore = false
-             break
+            // Other fatal errors
+            console.error('[Queue] Fatal error. Stopping queue.')
+            emitSystemLog('error', `[Queue] Fatal: ${message}`)
+            hasMore = false
+            break
           }
         }
       }
     }
 
-    // Tạm nghỉ 1s giữa các batch để tránh spam API liên tục gây rate limit
     await delay(1000, signal)
   }
 }

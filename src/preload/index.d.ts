@@ -1,7 +1,7 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { AppSettings, ProjectConfig, RecentProject } from '../shared/types'
 
-type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning'
+type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning' | 'skipped' | 'modified'
 
 export interface WorkspaceFile {
   id: number
@@ -70,6 +70,41 @@ export interface EngineProgress {
   error: number
 }
 
+export interface CompiledScanResult {
+  rpaFiles: string[]
+  rpycFiles: string[]
+  rpyFiles: string[]
+  hasCompiled: boolean
+  hasSource: boolean
+}
+
+export interface UnpackResult {
+  success: boolean
+  rpaExtracted: number
+  rpycDecompiled: number
+  failed: number
+  message: string
+}
+
+export interface UnpackProgressEvent {
+  event: 'info' | 'progress' | 'error' | 'complete'
+  message?: string
+  detail?: string
+  current?: number
+  total?: number
+  percent?: number
+  files_processed?: number
+  files_failed?: number
+}
+
+export interface DiffSummary {
+  unchanged: number
+  modified: number
+  newBlocks: number
+  removed: number
+  totalFiles: number
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -80,6 +115,16 @@ declare global {
         getCurrent: () => Promise<ProjectConfig | null>
         selectFolder: () => Promise<string | null>
         getRecent: () => Promise<RecentProject[]>
+        scanCompiled: (gameDir: string) => Promise<CompiledScanResult>
+        unpackGame: (gameDir: string, mode?: 'extract' | 'decompile' | 'auto') => Promise<UnpackResult>
+        installUnpackerDeps: () => Promise<{ success: boolean; message: string }>
+        previewDiff: (newGameDir: string, sourceLanguage: string) => Promise<{
+          newFileCount: number
+          existingFileCount: number
+          removedFileCount: number
+          totalNewRpyFiles: number
+        }>
+        updateGame: (newGameDir: string, sourceLanguage: string) => Promise<DiffSummary>
       }
       glossary: {
         getAll: () => Promise<GlossaryEntry[]>
@@ -101,6 +146,7 @@ declare global {
         getFiles: () => Promise<WorkspaceFile[]>
         getBlocks: (fileId: number) => Promise<WorkspaceBlock[]>
         updateBlock: (blockId: number, text: string | null, status: BlockStatus) => Promise<void>
+        batchApprove: (blockIds: number[]) => Promise<void>
       }
 
       engine: {
@@ -113,6 +159,7 @@ declare global {
       events: {
         onSystemLog: (callback: (entry: SystemLogEntry) => void) => () => void
         onEngineProgress: (callback: (progress: EngineProgress) => void) => () => void
+        onUnpackProgress: (callback: (event: UnpackProgressEvent) => void) => () => void
       }
       settings: {
         get: () => Promise<AppSettings>

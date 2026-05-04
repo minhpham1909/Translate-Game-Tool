@@ -1,10 +1,10 @@
 /**
  * SettingsModal.tsx
- * Modal cài đặt toàn cục, kết nối vào AppSettings.
+ * Modal cài đặt toàn cục, kết nối vào AppSettings (Phase 5 schema).
  * Có 4 tab: AI & API, Prompt & Logic, Translation Memory, System.
  */
 import { useEffect, useState } from 'react'
-import { Bot, Wand2, Database, Settings2, Eye, EyeOff, Sun, Moon, Monitor } from 'lucide-react'
+import { Bot, Wand2, Database, Settings2, Eye, EyeOff, Sun, Moon, Monitor, Filter, Plus, Trash2 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@renderer/components/ui/dialog'
@@ -18,15 +18,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { useTheme } from '@renderer/context/ThemeContext'
 import { cn } from '@renderer/lib/utils'
-import type { AIProvider, AppSettings } from '../../../../shared/types'
+import type { ActiveProviderId, AIProviderConfig, BlacklistPattern } from '../../../../shared/types'
 
-type SettingsTab = 'ai-api' | 'prompt-logic' | 'translation-memory' | 'system'
+type SettingsTab = 'ai-api' | 'prompt-logic' | 'translation-memory' | 'text-filter' | 'system'
 
 const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: 'ai-api',              label: 'AI & API',            icon: <Bot className="size-4" /> },
   { id: 'prompt-logic',        label: 'Prompt & Logic',      icon: <Wand2 className="size-4" /> },
   { id: 'translation-memory',  label: 'Translation Memory',  icon: <Database className="size-4" /> },
+  { id: 'text-filter',         label: 'Text Filter',         icon: <Filter className="size-4" /> },
   { id: 'system',              label: 'System',              icon: <Settings2 className="size-4" /> },
+]
+
+const providerOptions: { id: ActiveProviderId; label: string; description: string }[] = [
+  { id: 'gemini', label: 'Google Gemini', description: 'Gemini 2.5 Pro / Flash' },
+  { id: 'openai_compatible', label: 'OpenAI Compatible', description: 'GPT, DeepSeek, Grok, OpenRouter, Local LLM' },
+  { id: 'claude', label: 'Anthropic Claude', description: 'Claude Sonnet / Opus / Haiku' },
 ]
 
 interface SettingsModalProps {
@@ -34,46 +41,77 @@ interface SettingsModalProps {
   onOpenChange: (open: boolean) => void
 }
 
-/**
- * SettingsModal component
- * @param open - Trạng thái mở/đóng của modal
- * @param onOpenChange - Callback khi đóng modal
- */
 export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const { theme, setTheme } = useTheme()
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai-api')
   const [showApiKey, setShowApiKey] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
-  const [apiKeys, setApiKeys] = useState<Partial<Record<AIProvider, string>>>({})
-  const [modelId, setModelId] = useState('gemini-1.5-flash')
   const [availableModels, setAvailableModels] = useState<string[]>([])
 
-  // AI & API
-  const [provider, setProvider] = useState<AIProvider>('gemini')
-  const [apiKey, setApiKey] = useState('')
-  const [customEndpoint, setCustomEndpoint] = useState('')
-  const [temperature, setTemperature] = useState([0.2])
+  // Provider state
+  const [providerId, setProviderId] = useState<ActiveProviderId>('gemini')
+  const [providerConfigs, setProviderConfigs] = useState<Record<ActiveProviderId, AIProviderConfig>>({
+    gemini: { apiKey: '', baseURL: '', modelId: 'gemini-2.5-flash', customHeaders: {} },
+    openai_compatible: { apiKey: '', baseURL: 'https://api.openai.com/v1', modelId: 'gpt-4o', customHeaders: {} },
+    claude: { apiKey: '', baseURL: '', modelId: 'claude-sonnet-4-20250514', customHeaders: {} },
+  })
+
+  // Quick-access refs to current provider config
+  const currentConfig = providerConfigs[providerId]
+  const setField = <K extends keyof AIProviderConfig>(key: K, value: AIProviderConfig[K]) => {
+    setProviderConfigs(prev => ({
+      ...prev,
+      [providerId]: { ...prev[providerId], [key]: value },
+    }))
+  }
 
   // Prompt & Logic
   const [targetLanguage, setTargetLanguage] = useState('Tiếng Việt')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [batchSize, setBatchSize] = useState('20')
   const [concurrentRequests, setConcurrentRequests] = useState('1')
+  const [temperature, setTemperature] = useState([0.2])
 
   // Translation Memory
   const [enableAutoFill, setEnableAutoFill] = useState(true)
   const [fuzzyThreshold, setFuzzyThreshold] = useState([100])
+  const [enableSmartGlossary, setEnableSmartGlossary] = useState(true)
+  const [enableStrictGlossary, setEnableStrictGlossary] = useState(true)
+
+  // Text Filter (Regex Blacklist)
+  const [enableBlacklist, setEnableBlacklist] = useState(true)
+  const [blacklistPatterns, setBlacklistPatterns] = useState<BlacklistPattern[]>([])
+
+  // AI Self-Correction
+  const [enableSelfCorrection, setEnableSelfCorrection] = useState(true)
+  const [maxRetryAttempts, setMaxRetryAttempts] = useState('2')
+
+  // Text Overflow Linter
+  const [enableLengthCheck, setEnableLengthCheck] = useState(true)
+  const [maxLengthRatio, setMaxLengthRatio] = useState([1.3])
+
+  // Context Windowing
+  const [contextWindowSize, setContextWindowSize] = useState([5])
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
     void window.api.settings.get().then((settings) => {
       if (cancelled) return
-      setProvider(settings.activeProvider || 'gemini')
-      setModelId(settings.activeModelId || 'gemini-1.5-flash')
-      setApiKeys(settings.apiKeys || {})
-      setApiKey(settings.apiKeys?.[settings.activeProvider] || '')
-      setCustomEndpoint(settings.customEndpoint || '')
+
+      // Extract provider configs
+      const providers = settings.providers || {
+        gemini: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+        openai_compatible: { apiKey: '', baseURL: 'https://api.openai.com/v1', modelId: '', customHeaders: {} },
+        claude: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+      }
+
+      setProviderConfigs({
+        gemini: providers.gemini,
+        openai_compatible: providers.openai_compatible,
+        claude: providers.claude,
+      })
+      setProviderId(settings.activeProviderId || 'gemini')
       setTemperature([settings.temperature ?? 0.2])
       setTargetLanguage(settings.targetLanguage || 'Tiếng Việt')
       setSystemPrompt(settings.userCustomPrompt || '')
@@ -81,71 +119,75 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setConcurrentRequests(String(settings.concurrentRequests ?? 1))
       setEnableAutoFill(settings.enableTranslationMemory ?? true)
       setFuzzyThreshold([Math.round((settings.tmFuzzyThreshold ?? 1) * 100)])
+      setEnableSmartGlossary(settings.enableSmartGlossary ?? true)
+      setEnableStrictGlossary(settings.enableStrictGlossary ?? true)
+      setEnableBlacklist(settings.enableRegexBlacklist ?? true)
+      setBlacklistPatterns(settings.regexBlacklist ?? [])
+      setEnableSelfCorrection(settings.enableSelfCorrection ?? true)
+      setMaxRetryAttempts(String(settings.maxRetryAttempts ?? 2))
+      setEnableLengthCheck(settings.enableLengthCheck ?? true)
+      setMaxLengthRatio([settings.maxLengthRatio ?? 1.3])
+      setContextWindowSize([settings.contextWindowSize ?? 5])
     })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [open])
 
+  // Load models when provider changes
   useEffect(() => {
     if (!open) return
     let cancelled = false
+
+    const listModelProvider = providerId === 'openai_compatible' ? 'openai_compatible' : providerId
+
     void window.api.settings
-      .listModels(provider)
+      .listModels(listModelProvider)
       .then((models) => {
         if (cancelled) return
         setAvailableModels(models)
-        if (models.length > 0 && !models.includes(modelId)) {
-          setModelId(models[0])
-        }
-        if (models.length === 0) {
-          setModelId('')
+        const currentModel = providerConfigs[providerId]?.modelId || ''
+        if (models.length > 0 && !models.includes(currentModel)) {
+          setField('modelId', models[0])
         }
       })
-      .catch((err) => {
-        console.error('Failed to load models:', err)
+      .catch(() => {
         if (!cancelled) setAvailableModels([])
       })
-    return () => {
-      cancelled = true
-    }
-  }, [open, provider])
-
-  const handleProviderChange = (value: string): void => {
-    const nextProvider = value as AIProvider
-    setProvider(nextProvider)
-    setApiKey(apiKeys[nextProvider] || '')
-  }
-
-  const handleApiKeyChange = (value: string): void => {
-    setApiKey(value)
-    setApiKeys((prev) => ({ ...prev, [provider]: value }))
-  }
-
-  const buildSettingsPayload = (): Partial<AppSettings> => ({
-    activeProvider: provider,
-    activeModelId: modelId,
-    apiKeys,
-    customEndpoint,
-    temperature: temperature[0],
-    targetLanguage,
-    userCustomPrompt: systemPrompt,
-    batchSize: Number(batchSize) || 20,
-    concurrentRequests: Number(concurrentRequests) || 1,
-    enableTranslationMemory: enableAutoFill,
-    tmFuzzyThreshold: (fuzzyThreshold[0] || 100) / 100,
-    theme,
-  })
+    return () => { cancelled = true }
+  }, [open, providerId])
 
   const handleSave = async (): Promise<void> => {
-    await window.api.settings.save(buildSettingsPayload())
+    await window.api.settings.save({
+      providers: providerConfigs,
+      activeProviderId: providerId,
+      temperature: temperature[0],
+      targetLanguage,
+      userCustomPrompt: systemPrompt,
+      batchSize: Number(batchSize) || 20,
+      concurrentRequests: Number(concurrentRequests) || 1,
+      enableTranslationMemory: enableAutoFill,
+      tmFuzzyThreshold: (fuzzyThreshold[0] || 100) / 100,
+      enableSmartGlossary,
+      enableStrictGlossary,
+      enableRegexBlacklist: enableBlacklist,
+      regexBlacklist: blacklistPatterns,
+      enableSelfCorrection,
+      maxRetryAttempts: Number(maxRetryAttempts) || 2,
+      enableLengthCheck,
+      maxLengthRatio: maxLengthRatio[0],
+      contextWindowSize: contextWindowSize[0],
+      theme,
+    })
     onOpenChange(false)
   }
 
   const handleTestConnection = async (): Promise<void> => {
     setIsTesting(true)
     try {
-      await window.api.settings.save(buildSettingsPayload())
+      // Temporarily save to apply config for test
+      await window.api.settings.save({
+        providers: providerConfigs,
+        activeProviderId: providerId,
+      })
       const result = await window.api.settings.testConnection()
       if (result.ok) {
         alert('Connection OK')
@@ -195,53 +237,39 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               {/* ======================== TAB: AI & API ======================== */}
               {activeTab === 'ai-api' && (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="select-provider">Active Provider</Label>
-                    <Select value={provider} onValueChange={handleProviderChange}>
-                      <SelectTrigger id="select-provider" className="w-full">
-                        <SelectValue placeholder="Select provider" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="gemini">Google Gemini</SelectItem>
-                        <SelectItem value="gpt">OpenAI GPT</SelectItem>
-                        <SelectItem value="claude">Anthropic Claude</SelectItem>
-                        <SelectItem value="deepseek">DeepSeek</SelectItem>
-                        <SelectItem value="grok">Grok (xAI)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">Model AI sẽ dùng để dịch.</p>
+                  {/* Provider Selection */}
+                  <div className="space-y-3">
+                    <Label>Active Provider</Label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {providerOptions.map((opt) => (
+                        <button
+                          key={opt.id}
+                          id={`btn-provider-${opt.id}`}
+                          onClick={() => setProviderId(opt.id)}
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-3 rounded-lg border text-sm transition-colors',
+                            providerId === opt.id
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border hover:border-primary/50 text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          <span className="font-medium text-xs">{opt.label}</span>
+                          <span className="text-[10px] opacity-70 leading-tight">{opt.description}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="select-model">Active Model</Label>
-                    <Select value={modelId} onValueChange={setModelId}>
-                      <SelectTrigger id="select-model" className="w-full">
-                        <SelectValue placeholder="Select model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableModels.length > 0 ? (
-                          availableModels.map((model) => (
-                            <SelectItem key={model} value={model}>
-                              {model}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value={modelId}>{modelId}</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">Model ID must match the provider.</p>
-                  </div>
-
+                  {/* API Key */}
                   <div className="space-y-2">
                     <Label htmlFor="input-api-key">API Key</Label>
                     <div className="relative">
                       <Input
                         id="input-api-key"
                         type={showApiKey ? 'text' : 'password'}
-                        value={apiKey}
-                        onChange={(e) => handleApiKeyChange(e.target.value)}
-                        placeholder="Nhập API key của bạn..."
+                        value={currentConfig?.apiKey || ''}
+                        onChange={(e) => setField('apiKey', e.target.value)}
+                        placeholder="Enter your API key..."
                         className="pr-10"
                       />
                       <button
@@ -253,35 +281,92 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       </button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      API key được lưu cục bộ và không bao giờ gửi lên server.
+                      Stored locally. Never sent to any server except the provider's API.
                     </p>
                   </div>
 
+                  {/* Model Selection */}
                   <div className="space-y-2">
-                    <Label htmlFor="input-custom-endpoint">Custom Endpoint (tùy chọn)</Label>
-                    <Input
-                      id="input-custom-endpoint"
-                      value={customEndpoint}
-                      onChange={(e) => setCustomEndpoint(e.target.value)}
-                      placeholder="https://api.example.com/v1"
-                    />
+                    <Label htmlFor="select-model">Model</Label>
+                    <Select
+                      value={currentConfig?.modelId || ''}
+                      onValueChange={(v) => setField('modelId', v)}
+                    >
+                      <SelectTrigger id="select-model" className="w-full">
+                        <SelectValue placeholder="Select model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableModels.length > 0 ? (
+                          availableModels.map((model) => (
+                            <SelectItem key={model} value={model}>{model}</SelectItem>
+                          ))
+                        ) : currentConfig?.modelId ? (
+                          <SelectItem value={currentConfig.modelId}>{currentConfig.modelId}</SelectItem>
+                        ) : (
+                          <SelectItem value="none">No models available</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                     <p className="text-xs text-muted-foreground">
-                      Để trống nếu dùng endpoint mặc định. Dùng cho Local LLM / OpenRouter.
+                      {providerId === 'openai_compatible'
+                        ? 'Auto-detected from endpoint. Enter manually if using custom LLM.'
+                        : 'Model ID for the selected provider.'}
                     </p>
                   </div>
 
+                  {/* OpenAI Compatible: Base URL */}
+                  {providerId === 'openai_compatible' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="input-base-url">Base URL</Label>
+                        <Input
+                          id="input-base-url"
+                          value={currentConfig?.baseURL || ''}
+                          onChange={(e) => setField('baseURL', e.target.value)}
+                          placeholder="https://api.openai.com/v1"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Override for DeepSeek, Grok, OpenRouter, Ollama, etc. Default: OpenAI.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="input-custom-headers">Custom Headers (JSON, optional)</Label>
+                        <Textarea
+                          id="input-custom-headers"
+                          value={JSON.stringify(currentConfig?.customHeaders || {}, null, 2)}
+                          onChange={(e) => {
+                            try {
+                              const parsed = JSON.parse(e.target.value)
+                              setField('customHeaders', parsed)
+                            } catch {
+                              // Invalid JSON — ignore until user fixes
+                            }
+                          }}
+                          placeholder={`{\n  "HTTP-Referer": "your-app.com",\n  "X-Title": "VN Translator"\n}`}
+                          className="font-mono text-xs min-h-[80px]"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Required for OpenRouter (HTTP-Referer, X-Title). Valid JSON only.
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Test Connection */}
                   <div className="flex justify-start">
                     <Button
                       id="btn-test-connection"
                       variant="outline"
                       size="sm"
                       onClick={handleTestConnection}
-                      disabled={isTesting}
+                      disabled={isTesting || !currentConfig?.apiKey}
                     >
-                      Test Connection
+                      {isTesting ? 'Testing...' : 'Test Connection'}
                     </Button>
                   </div>
 
+                  {/* Temperature */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <Label>Temperature</Label>
@@ -296,7 +381,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       className="w-full"
                     />
                     <p className="text-xs text-warning flex items-center gap-1.5">
-                      ⚠️ Giữ dưới 0.3 để tránh AI bịa thêm tag hoặc quên biến.
+                      ⚠️ Keep below 0.3 to avoid AI hallucinating tags or forgetting variables.
                     </p>
                   </div>
                 </>
@@ -311,11 +396,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       id="input-target-lang"
                       value={targetLanguage}
                       onChange={(e) => setTargetLanguage(e.target.value)}
-                      placeholder="ví dụ: Tiếng Việt, Japanese"
+                      placeholder="e.g., Tiếng Việt, Japanese"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Ngôn ngữ bạn muốn dịch sang.
-                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -324,11 +406,11 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       id="textarea-system-prompt"
                       value={systemPrompt}
                       onChange={(e) => setSystemPrompt(e.target.value)}
-                      placeholder="Nhập hướng dẫn bổ sung cho AI..."
+                      placeholder="Additional instructions for AI..."
                       className="min-h-[120px]"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Hướng dẫn văn phong, lưu ý đặc biệt cho AI dịch.
+                      Style guidelines, context notes for the translator.
                     </p>
                   </div>
 
@@ -342,7 +424,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         onChange={(e) => setBatchSize(e.target.value)}
                         min={1} max={100}
                       />
-                      <p className="text-xs text-muted-foreground">Blocks/request (mặc định: 20)</p>
+                      <p className="text-xs text-muted-foreground">Blocks per request (default: 20)</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="input-concurrent">Concurrent Requests</Label>
@@ -353,8 +435,78 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         onChange={(e) => setConcurrentRequests(e.target.value)}
                         min={1} max={5}
                       />
-                      <p className="text-xs text-muted-foreground">Request song song (1-5)</p>
+                      <p className="text-xs text-muted-foreground">Parallel requests (1-5)</p>
                     </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">AI Self-Correction</Label>
+                      <p className="text-xs text-muted-foreground">
+                        When the linter finds errors (missing tags/vars), the AI automatically retries to fix them.
+                      </p>
+                    </div>
+                    <Switch checked={enableSelfCorrection} onCheckedChange={setEnableSelfCorrection} />
+                  </div>
+
+                  {enableSelfCorrection && (
+                    <div className="space-y-2">
+                      <Label htmlFor="input-max-retries">Max Retry Attempts</Label>
+                      <Input
+                        id="input-max-retries"
+                        type="number"
+                        value={maxRetryAttempts}
+                        onChange={(e) => setMaxRetryAttempts(e.target.value)}
+                        min={1} max={3}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        1 = quick fix, 2 = thorough (default), 3 = maximum quality (more API cost).
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Text Overflow Warning</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Warn when translation is significantly longer than source (can overflow game UI).
+                      </p>
+                    </div>
+                    <Switch checked={enableLengthCheck} onCheckedChange={setEnableLengthCheck} />
+                  </div>
+
+                  {enableLengthCheck && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Max Length Ratio</Label>
+                        <span className="text-sm font-mono text-muted-foreground">{maxLengthRatio[0].toFixed(1)}x</span>
+                      </div>
+                      <Slider
+                        value={maxLengthRatio}
+                        onValueChange={setMaxLengthRatio}
+                        min={1.1} max={2.0} step={0.1}
+                        className="w-full"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        1.3x = Vietnamese typical (30% longer). Lower = stricter.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label>Context Window Size</Label>
+                      <span className="text-sm font-mono text-muted-foreground">{contextWindowSize[0]} blocks</span>
+                    </div>
+                    <Slider
+                      value={contextWindowSize}
+                      onValueChange={setContextWindowSize}
+                      min={0} max={15} step={1}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Number of previous translated blocks sent as context to AI (0 = disabled). Helps maintain pronoun/tone consistency.
+                    </p>
                   </div>
                 </>
               )}
@@ -366,7 +518,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     <div className="space-y-0.5">
                       <Label className="text-sm font-medium">Enable Auto-fill from TM</Label>
                       <p className="text-xs text-muted-foreground">
-                        Tự động điền từ Translation Memory khi tìm thấy match.
+                        Auto-fill from Translation Memory when exact match found.
                       </p>
                     </div>
                     <Switch checked={enableAutoFill} onCheckedChange={setEnableAutoFill} />
@@ -384,7 +536,123 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       className="w-full"
                     />
                     <p className="text-xs text-muted-foreground">
-                      100% = khớp chính xác. Giảm xuống để dùng fuzzy matching.
+                      100% = exact match only. Lower for fuzzy matching.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Smart Glossary Injection</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Only inject glossary terms relevant to the current batch. Saves tokens and reduces AI confusion.
+                      </p>
+                    </div>
+                    <Switch checked={enableSmartGlossary} onCheckedChange={setEnableSmartGlossary} />
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Strict Glossary Verification</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Linter checks that glossary terms in source text are translated exactly as specified. Triggers AI self-correction if violated.
+                      </p>
+                    </div>
+                    <Switch checked={enableStrictGlossary} onCheckedChange={setEnableStrictGlossary} />
+                  </div>
+                </>
+              )}
+
+              {/* ======================== TAB: TEXT FILTER ======================== */}
+              {activeTab === 'text-filter' && (
+                <>
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Enable Regex Blacklist</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Auto-skip strings matching patterns (saves tokens, prevents hallucination).
+                      </p>
+                    </div>
+                    <Switch checked={enableBlacklist} onCheckedChange={setEnableBlacklist} />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm">Filter Patterns</Label>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setBlacklistPatterns(prev => [
+                            ...prev,
+                            { pattern: '', description: 'New pattern', enabled: true },
+                          ])
+                        }}
+                      >
+                        <Plus className="size-3 mr-1" /> Add Pattern
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {blacklistPatterns.map((pattern, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/20"
+                        >
+                          <Switch
+                            checked={pattern.enabled}
+                            onCheckedChange={(checked) => {
+                              setBlacklistPatterns(prev =>
+                                prev.map((p, i) => (i === idx ? { ...p, enabled: checked } : p))
+                              )
+                            }}
+                          />
+                          <div className="flex-1 space-y-1 min-w-0">
+                            <Input
+                              value={pattern.description}
+                              onChange={(e) => {
+                                setBlacklistPatterns(prev =>
+                                  prev.map((p, i) => (i === idx ? { ...p, description: e.target.value } : p))
+                                )
+                              }}
+                              placeholder="Description..."
+                              className="h-7 text-xs"
+                            />
+                            <Input
+                              value={pattern.pattern}
+                              onChange={(e) => {
+                                setBlacklistPatterns(prev =>
+                                  prev.map((p, i) => (i === idx ? { ...p, pattern: e.target.value } : p))
+                                )
+                              }}
+                              placeholder="Regex pattern (e.g., ^\\s*$)"
+                              className="h-7 text-xs font-mono"
+                            />
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive flex-shrink-0"
+                            onClick={() => {
+                              setBlacklistPatterns(prev => prev.filter((_, i) => i !== idx))
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+
+                      {blacklistPatterns.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground text-sm">
+                          No patterns configured. Add a pattern to get started.
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Common patterns: <code className="bg-muted px-1 py-0.5 rounded">^\s*$</code> (empty),{' '}
+                      <code className="bg-muted px-1 py-0.5 rounded">^[^a-zA-Z0-9]+$</code> (symbols only),{' '}
+                      <code className="bg-muted px-1 py-0.5 rounded">^[0-9]+$</code> (numbers)
                     </p>
                   </div>
                 </>
@@ -393,7 +661,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               {/* ======================== TAB: SYSTEM ======================== */}
               {activeTab === 'system' && (
                 <>
-                  {/* Theme Selector */}
                   <div className="space-y-3">
                     <Label>Interface Theme</Label>
                     <div className="grid grid-cols-3 gap-2">
@@ -418,12 +685,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Chủ đề giao diện. System sẽ tự động theo cài đặt hệ điều hành.
-                    </p>
                   </div>
 
-                  {/* App Info */}
                   <div className="p-4 rounded-lg border border-border bg-muted/30">
                     <h3 className="text-sm font-medium mb-3">Application Info</h3>
                     <div className="space-y-2 text-sm">
@@ -437,20 +700,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       </div>
                     </div>
                   </div>
-
-                  <div className="flex gap-2">
-                    <Button id="btn-clear-cache" variant="outline" size="sm">Clear Cache</Button>
-                    <Button id="btn-reset-settings" variant="outline" size="sm" className="text-destructive hover:text-destructive">
-                      Reset Defaults
-                    </Button>
-                  </div>
                 </>
               )}
             </div>
           </ScrollArea>
         </div>
 
-        {/* Modal Footer */}
+        {/* Footer */}
         <DialogFooter className="px-6 py-4 border-t border-border bg-muted/30">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button id="btn-save-settings" onClick={handleSave}>Save Changes</Button>

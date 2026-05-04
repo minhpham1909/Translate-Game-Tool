@@ -2,10 +2,11 @@
  * App.tsx
  * Entry point chính — điều phối giữa WelcomeScreen và CATWorkspace.
  * Tất cả modals được quản lý ở đây và truyền xuống qua props.
- * Step 2: Mock Data. Step 3 sẽ kết nối window.api thật.
  */
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ThemeProvider } from '@renderer/context/ThemeContext'
+import { NotificationProvider, useNotification } from '@renderer/context/NotificationContext'
+import { NotificationToast } from '@renderer/components/ui/notification-toast'
 import { WelcomeScreen } from '@renderer/components/screens/WelcomeScreen'
 import { SetupWizardModal } from '@renderer/components/screens/SetupWizardModal'
 import { PreflightModal } from '@renderer/components/screens/PreflightModal'
@@ -15,6 +16,7 @@ import { TMManagerModal } from '@renderer/components/screens/TMManagerModal'
 import { GlossaryModal } from '@renderer/components/screens/GlossaryModal'
 import { SearchReplaceModal } from '@renderer/components/screens/SearchReplaceModal'
 import { KeyboardShortcutsModal } from '@renderer/components/screens/KeyboardShortcutsModal'
+import { UpdateGameModal } from '@renderer/components/screens/UpdateGameModal'
 import { TopHeader } from '@renderer/components/cat-tool/TopHeader'
 import { LeftSidebar, SidebarFile } from '@renderer/components/cat-tool/LeftSidebar'
 import { TranslationWorkspace } from '@renderer/components/cat-tool/TranslationWorkspace'
@@ -53,12 +55,13 @@ interface ModalState {
   glossary: boolean
   searchReplace: boolean
   keyboardShortcuts: boolean
+  updateGame: boolean
 }
 
 const DEFAULT_MODAL_STATE: ModalState = {
   settings: false, setupWizard: false, preflight: false, export: false,
   qaReport: false, tmManager: false, glossary: false, searchReplace: false,
-  keyboardShortcuts: false,
+  keyboardShortcuts: false, updateGame: false,
 }
 
 // ============================================================
@@ -84,6 +87,7 @@ function CATWorkspace({
   const [preflightData, setPreflightData] = useState({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
   const activeFileIdRef = useRef<number | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const notify = useNotification()
 
   const fetchFiles = async (): Promise<void> => {
     try {
@@ -234,9 +238,11 @@ function CATWorkspace({
         await window.api.engine.translateBatch([blockId])
         if (activeFileId !== null) await fetchBlocks(activeFileId)
         await fetchFiles()
+        notify.success('AI Translation', 'Block translated successfully')
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
         console.error('AI translate failed:', message)
+        notify.error('AI Translation Failed', message)
         setLogs((prev) => {
           const next = [
             ...prev,
@@ -248,6 +254,35 @@ function CATWorkspace({
           ]
           return next.length > MAX_LOGS ? next.slice(next.length - MAX_LOGS) : next
         })
+      }
+    })()
+  }
+
+  const handleBatchTranslate = (blockIds: number[]): void => {
+    void (async () => {
+      try {
+        await window.api.engine.translateBatch(blockIds)
+        if (activeFileId !== null) await fetchBlocks(activeFileId)
+        await fetchFiles()
+        notify.success('Batch Translate', `${blockIds.length} blocks translated`)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('Batch translate failed:', message)
+        notify.error('Batch Translate Failed', message)
+      }
+    })()
+  }
+
+  const handleBatchApprove = (blockIds: number[]): void => {
+    void (async () => {
+      try {
+        await window.api.workspace.batchApprove(blockIds)
+        if (activeFileId !== null) await fetchBlocks(activeFileId)
+        notify.success('Batch Approve', `${blockIds.length} blocks approved`)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('Batch approve failed:', message)
+        notify.error('Batch Approve Failed', message)
       }
     })()
   }
@@ -322,6 +357,7 @@ function CATWorkspace({
         onGlossaryClick={() => openModal('glossary')}
         onTMClick={() => openModal('tmManager')}
         onShortcutsClick={() => openModal('keyboardShortcuts')}
+        onGameUpdateClick={() => openModal('updateGame')}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -341,6 +377,8 @@ function CATWorkspace({
           onApprove={handleApprove}
           onRevert={handleRevert}
           onAITranslate={handleAITranslate}
+          onBatchTranslate={handleBatchTranslate}
+          onBatchApprove={handleBatchApprove}
         />
       </div>
 
@@ -414,6 +452,16 @@ function CATWorkspace({
         open={modals.keyboardShortcuts}
         onOpenChange={(o) => setModals((p) => ({ ...p, keyboardShortcuts: o }))}
       />
+
+      <UpdateGameModal
+        open={modals.updateGame}
+        onOpenChange={(o) => setModals((p) => ({ ...p, updateGame: o }))}
+        sourceLanguage="english"
+        onComplete={() => {
+          if (activeFileId !== null) void fetchBlocks(activeFileId)
+          void fetchFiles()
+        }}
+      />
     </div>
   )
 }
@@ -422,6 +470,7 @@ function CATWorkspace({
 // APP ROOT — Điều phối Welcome ↔ Workspace
 // ============================================================
 function AppContent(): ReactElement {
+  const notify = useNotification()
   const [hasProject, setHasProject] = useState(false)
   const [isWizardOpen, setIsWizardOpen] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
@@ -459,7 +508,7 @@ function AppContent(): ReactElement {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       console.error('Failed to open project:', message)
-      alert(message || 'Không thể mở project.')
+      notify.error('Failed to open project', message)
     }
   }
 
@@ -475,7 +524,7 @@ function AppContent(): ReactElement {
         />
       ) : (
         <WelcomeScreen
-          hasApiKey={false} // TODO: Đọc từ electron-store ở Phase 4E
+          hasApiKey={false}
           recentProjects={recentProjects}
           onNewProject={() => setIsWizardOpen(true)}
           onOpenProject={handleOpenProject}
@@ -491,17 +540,20 @@ function AppContent(): ReactElement {
           setWorkspaceKey((prev) => prev + 1)
         }}
       />
+      <NotificationToast />
     </TooltipProvider>
   )
 }
 
 /**
- * App — Root component bọc ThemeProvider.
+ * App — Root component bọc ThemeProvider + NotificationProvider.
  */
 export default function App(): ReactElement {
   return (
     <ThemeProvider defaultTheme="dark">
-      <AppContent />
+      <NotificationProvider>
+        <AppContent />
+      </NotificationProvider>
     </ThemeProvider>
   )
 }

@@ -1,172 +1,139 @@
+/**
+ * AIService — Central AI translation manager.
+ *
+ * Phase 5 Refactor:
+ * - Uses new provider-based settings schema (providers.{gemini,openai_compatible,claude})
+ * - Routes all OpenAI-compatible providers (OpenAI, DeepSeek, Grok, OpenRouter, Local LLM)
+ *   through a single OpenAICompatibleTranslator
+ * - GeminiTranslator and ClaudeTranslator remain as separate classes
+ */
+
 import { GoogleGenerativeAI, Schema, SchemaType } from '@google/generative-ai'
-// Import hàm lấy settings từ store của bạn (để agent tự link)
-import { getSettings } from '../store/settings'
+import { getSettings, getActiveProviderConfig } from '../store/settings'
+import { AppSettings } from '../../shared/types'
+import { OpenAICompatibleTranslator } from './translators/OpenAICompatibleTranslator'
+import { APIError } from './errors'
 
 // ============================================================================
-// 1. HYBRID PROMPT ARCHITECTURE
+// HYBRID PROMPT ARCHITECTURE
 // ============================================================================
-const getSystemPrompt = (targetLanguage: string, userCustomPrompt: string, glossary: string = "") => {
-  // Part A: Technical Rules (HARDCODED - Mệnh lệnh không thể thương lượng)
+
+export interface ContextBlock {
+  character: string | null
+  original: string
+  translated: string
+}
+
+export function getSystemPrompt(targetLanguage: string, userCustomPrompt: string, glossary: string = "", contextHistory: ContextBlock[] = []): string {
+  // Part A: Technical Rules (HARDCODED)
   const partA = `Nhiệm vụ của bạn là dịch mảng JSON các chuỗi hội thoại/UI sang ${targetLanguage}.
 QUY TẮC KỸ THUẬT BẮT BUỘC (CRITICAL):
 1. KHÔNG dịch, KHÔNG xóa, KHÔNG thay đổi vị trí các biến số trong ngoặc vuông: [player_name], [gold]...
 2. KHÔNG dịch các thẻ tag trong ngoặc nhọn: {b}, {color=#f00}, {i}...
 3. GIỮ NGUYÊN các ký tự escape: \\", \\n
-4. BẮT BUỘC trả về mảng JSON có số lượng phần tử giống hệt input (tương ứng 1-1).`;
+4. BẮT BUỘC trả về mảng JSON có số lượng phần tử giống hệt input (tương ứng 1-1).`
+
+  // Part A-1: Context History (for pronoun/tone consistency)
+  let partContext = ""
+  if (contextHistory.length > 0) {
+    const contextLines = contextHistory
+      .map((c) => {
+        const char = c.character ? `[${c.character}]` : '[?]'
+        return `- ${char}: "${c.original}" → "${c.translated}"`
+      })
+      .join('\n')
+    partContext = `\n\nNGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ (CHỈ THAM CHIẾU, KHÔNG DỊCH):\n${contextLines}\n\nDùng ngữ cảnh trên để suy luận đại từ/xưng hô cho nhất quán. KHÔNG dịch lại các dòng này.`
+  }
 
   // Part B: Contextual Rules (Dynamic from Settings)
-  let partB = "";
+  let partB = ""
   if (userCustomPrompt) {
-    partB += `\n\nQUY TẮC VĂN PHONG:\n${userCustomPrompt}`;
+    partB += `\n\nQUY TẮC VĂN PHONG:\n${userCustomPrompt}`
   } else {
     partB += `\n\nQUY TẮC VĂN PHONG:
 1. Bản địa hóa tự nhiên: Dùng văn nói, ngôn ngữ mạng hoặc từ lóng phù hợp với ngữ cảnh. KHÔNG dịch máy.
 2. Xưng hô: Tự suy luận mối quan hệ qua ngữ cảnh để dùng đại từ cho mượt mà.
-3. Nếu chuỗi chỉ là các dấu câu ("...", "?!", "Ah."), hãy giữ nguyên, không cần bịa thêm chữ.`;
+3. Nếu chuỗi chỉ là các dấu câu ("...", "?!", "Ah."), hãy giữ nguyên, không cần bịa thêm chữ.`
   }
 
   if (glossary) {
-    partB += `\n\nTỪ ĐIỂN THUẬT NGỮ (BẮT BUỘC TUÂN THỦ):\nDịch các từ khóa sau đúng theo danh sách:\n${glossary}`;
+    partB += `\n\nTỪ ĐIỂN THUẬT NGỮ (BẮT BUỘC TUÂN THỦ):\nDịch các từ khóa sau đúng theo danh sách:\n${glossary}`
   }
 
-  return partA + partB;
-}
-
-
-// ============================================================================
-// 2. INTERFACE CHUNG CHO MỌI MODEL AI (Adapter Pattern)
-// ============================================================================
-import { AppSettings } from '../../shared/types'
-
-export interface IAITranslator {
-  providerName: string;
-  translate(texts: string[], settings: AppSettings, glossaryText?: string): Promise<string[]>;
+  return partA + partContext + partB
 }
 
 // ============================================================================
-// 3. IMPLEMENTATION CHO GEMINI
+// GEMINI TRANSLATOR
 // ============================================================================
-class GeminiTranslator implements IAITranslator {
-  providerName = 'Gemini';
-  private genAI: GoogleGenerativeAI;
-  private modelName: string;
+
+class GeminiTranslator {
+  providerName = 'Gemini'
+  private genAI: GoogleGenerativeAI
+  private modelName: string
 
   constructor(apiKey: string, modelName: string) {
-    this.genAI = new GoogleGenerativeAI(apiKey);
-    this.modelName = modelName;
+    this.genAI = new GoogleGenerativeAI(apiKey)
+    this.modelName = modelName
   }
 
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
+  async translate(texts: string[], settings: AppSettings, glossaryText: string = "", contextHistory: ContextBlock[] = []): Promise<string[]> {
     const responseSchema: Schema = {
       type: SchemaType.ARRAY,
       items: { type: SchemaType.STRING }
-    };
+    }
 
     const model = this.genAI.getGenerativeModel({
       model: this.modelName,
-      systemInstruction: getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText),
+      systemInstruction: getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText, contextHistory),
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
-        temperature: settings.temperature, // Hybrid Prompt yêu cầu lấy temp từ settings
-      }
-    });
-
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
-
-    try {
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text();
-
-      const translatedArray: string[] = JSON.parse(responseText);
-
-      if (translatedArray.length !== texts.length) {
-        throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
-      }
-
-      return translatedArray;
-    } catch (error) {
-      throw error;
-    }
-  }
-}
-
-// ============================================================================
-// 4. IMPLEMENTATION CHO OPENAI / GPT
-// ============================================================================
-class GPTTranslator implements IAITranslator {
-  providerName = 'GPT';
-  private apiKey: string;
-  private modelName: string;
-  private endpoint: string;
-
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
-    this.apiKey = apiKey;
-    this.modelName = modelName;
-    this.endpoint = customEndpoint || 'https://api.openai.com/v1/chat/completions';
-  }
-
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
-    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
-
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: this.modelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
         temperature: settings.temperature,
-        response_format: { type: 'json_object' }
-      })
-    });
+      }
+    })
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`[AI Service | GPT] API Error ${response.status}: ${body}`);
+    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`
+
+    const result = await model.generateContent(prompt)
+    const responseText = result.response.text()
+
+    let translatedArray: string[]
+    try {
+      translatedArray = JSON.parse(responseText)
+    } catch {
+      throw new APIError(`Gemini returned invalid JSON: ${responseText.substring(0, 200)}`)
     }
 
-    const data = await response.json();
-    const content: string = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('[AI Service | GPT] Empty response from API');
-    }
-
-    const translatedArray: string[] = JSON.parse(content);
     if (translatedArray.length !== texts.length) {
-      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
+      throw new APIError(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`)
     }
 
-    return translatedArray;
+    return translatedArray
   }
 }
 
 // ============================================================================
-// 5. IMPLEMENTATION CHO CLAUDE (Anthropic)
+// CLAUDE TRANSLATOR
 // ============================================================================
-class ClaudeTranslator implements IAITranslator {
-  providerName = 'Claude';
-  private apiKey: string;
-  private modelName: string;
-  private endpoint: string;
 
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
-    this.apiKey = apiKey;
-    this.modelName = modelName;
-    this.endpoint = customEndpoint || 'https://api.anthropic.com/v1/messages';
+class ClaudeTranslator {
+  providerName = 'Claude'
+  private apiKey: string
+  private modelName: string
+  private baseURL: string
+
+  constructor(apiKey: string, modelName: string, baseURL?: string) {
+    this.apiKey = apiKey
+    this.modelName = modelName
+    this.baseURL = baseURL || 'https://api.anthropic.com/v1'
   }
 
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
-    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
+  async translate(texts: string[], settings: AppSettings, glossaryText: string = "", contextHistory: ContextBlock[] = []): Promise<string[]> {
+    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText, contextHistory)
+    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`
 
-    const response = await fetch(this.endpoint, {
+    const response = await fetch(`${this.baseURL.replace(/\/+$/, '')}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -176,280 +143,234 @@ class ClaudeTranslator implements IAITranslator {
       body: JSON.stringify({
         model: this.modelName,
         system: systemPrompt,
-        messages: [
-          { role: 'user', content: prompt }
-        ],
+        messages: [{ role: 'user', content: prompt }],
         max_tokens: 4096,
         temperature: settings.temperature
       })
-    });
+    })
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`[AI Service | Claude] API Error ${response.status}: ${body}`);
+      const body = await response.text()
+      throw new APIError(`Claude API Error ${response.status}: ${body}`, response.status, body)
     }
 
-    const data = await response.json();
-    const content: string = data.content?.[0]?.text;
+    const data = await response.json()
+    const content: string = data.content?.[0]?.text
     if (!content) {
-      throw new Error('[AI Service | Claude] Empty response from API');
+      throw new APIError('Empty response from Claude API')
     }
 
-    const translatedArray: string[] = JSON.parse(content);
+    // Parse JSON from potentially dirty response
+    let translatedArray: string[]
+    try {
+      // Strip markdown and find JSON array
+      let cleaned = content.replace(/```(?:json)?\s*/gi, '').replace(/```\s*$/g, '').trim()
+      const firstBracket = cleaned.indexOf('[')
+      const lastBracket = cleaned.lastIndexOf(']')
+      if (firstBracket === -1 || lastBracket <= firstBracket) {
+        throw new Error('No JSON array found')
+      }
+      translatedArray = JSON.parse(cleaned.substring(firstBracket, lastBracket + 1))
+    } catch {
+      throw new APIError(`Claude returned invalid JSON: ${content.substring(0, 200)}`)
+    }
+
     if (translatedArray.length !== texts.length) {
-      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
+      throw new APIError(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`)
     }
 
-    return translatedArray;
+    return translatedArray
   }
 }
 
 // ============================================================================
-// 6. IMPLEMENTATION CHO DEEPSEEK
-// ============================================================================
-class DeepSeekTranslator implements IAITranslator {
-  providerName = 'DeepSeek';
-  private apiKey: string;
-  private modelName: string;
-  private endpoint: string;
-
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
-    this.apiKey = apiKey;
-    this.modelName = modelName;
-    this.endpoint = customEndpoint || 'https://api.deepseek.com/v1/chat/completions';
-  }
-
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
-    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
-
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: this.modelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
-        temperature: settings.temperature,
-        response_format: { type: 'json_object' }
-      })
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`[AI Service | DeepSeek] API Error ${response.status}: ${body}`);
-    }
-
-    const data = await response.json();
-    const content: string = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('[AI Service | DeepSeek] Empty response from API');
-    }
-
-    const translatedArray: string[] = JSON.parse(content);
-    if (translatedArray.length !== texts.length) {
-      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
-    }
-
-    return translatedArray;
-  }
-}
-
-// ============================================================================
-// 7. IMPLEMENTATION CHO GROK (xAI)
-// ============================================================================
-class GrokTranslator implements IAITranslator {
-  providerName = 'Grok';
-  private apiKey: string;
-  private modelName: string;
-  private endpoint: string;
-
-  constructor(apiKey: string, modelName: string, customEndpoint?: string) {
-    this.apiKey = apiKey;
-    this.modelName = modelName;
-    this.endpoint = customEndpoint || 'https://api.x.ai/v1/chat/completions';
-  }
-
-  async translate(texts: string[], settings: AppSettings, glossaryText: string = ""): Promise<string[]> {
-    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText);
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`;
-
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: this.modelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
-        temperature: settings.temperature,
-        response_format: { type: 'json_object' }
-      })
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`[AI Service | Grok] API Error ${response.status}: ${body}`);
-    }
-
-    const data = await response.json();
-    const content: string = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('[AI Service | Grok] Empty response from API');
-    }
-
-    const translatedArray: string[] = JSON.parse(content);
-    if (translatedArray.length !== texts.length) {
-      throw new Error(`Array length mismatch: Input ${texts.length}, Output ${translatedArray.length}`);
-    }
-
-    return translatedArray;
-  }
-}
-
-// ============================================================================
-// 5. GLOBAL AI SERVICE (Core Manager)
+// MODEL DEFAULTS
 // ============================================================================
 
 export const DEFAULT_MODELS: Record<string, string[]> = {
   gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
-  gpt: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  openai_compatible: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
   claude: ['claude-sonnet-4-20250514', 'claude-opus-4-20250414', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  grok: ['grok-3', 'grok-3-fast', 'grok-2']
-};
+}
+
+// ============================================================================
+// AISERVICE — Factory Manager
+// ============================================================================
 
 export class AIService {
   /**
-   * Gọi API dịch thuật dựa trên cấu hình Global Settings của người dùng.
-   * Xử lý log tập trung cho toàn hệ thống.
+   * Translate a batch of texts using the currently active provider.
    */
-  static async translateBatch(texts: string[], glossaryText: string = ""): Promise<string[]> {
-    const settings = getSettings();
-    const activeProvider = settings.activeProvider || 'gemini';
-    const apiKey = settings.apiKeys[activeProvider];
-    let modelId = settings.activeModelId || '';
+  static async translateBatch(texts: string[], glossaryText: string = "", contextHistory: ContextBlock[] = []): Promise<string[]> {
+    const settings = getSettings()
+    const { providerId, config } = getActiveProviderConfig()
 
-    if (!apiKey) {
-      const errorMsg = `[AI Service Error] Missing API Key for provider: ${activeProvider.toUpperCase()}`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
+    if (!config.apiKey) {
+      throw new APIError(`Missing API Key for provider: ${providerId.toUpperCase()}`)
     }
 
-    let translator: IAITranslator;
-
+    const modelId = config.modelId || DEFAULT_MODELS[providerId]?.[0] || ''
     if (!modelId) {
-      const models = await AIService.listModels(activeProvider)
-      if (models.length === 0) {
-        throw new Error(`[AI Service Error] No available models for provider: ${activeProvider.toUpperCase()}`)
-      }
-      modelId = models[0]
+      throw new APIError(`No model configured for provider: ${providerId.toUpperCase()}`)
     }
 
-    switch (activeProvider.toLowerCase()) {
+    let translator: { providerName: string; translate(texts: string[], settings: AppSettings, glossary: string, context: ContextBlock[]): Promise<string[]> }
+
+    switch (providerId) {
       case 'gemini':
-        translator = new GeminiTranslator(apiKey, modelId);
-        break;
+        translator = new GeminiTranslator(config.apiKey, modelId)
+        break
+
       case 'claude':
-        translator = new ClaudeTranslator(apiKey, modelId);
-        break;
-      case 'gpt':
-      case 'openai':
-        translator = new GPTTranslator(apiKey, modelId, settings.customEndpoint);
-        break;
-      case 'deepseek':
-        translator = new DeepSeekTranslator(apiKey, modelId, settings.customEndpoint);
-        break;
-      case 'grok':
-        translator = new GrokTranslator(apiKey, modelId, settings.customEndpoint);
-        break;
+        translator = new ClaudeTranslator(config.apiKey, modelId, config.baseURL || undefined)
+        break
+
+      case 'openai_compatible':
+        translator = new OpenAICompatibleTranslator({
+          baseURL: config.baseURL || 'https://api.openai.com/v1',
+          apiKey: config.apiKey,
+          modelId,
+          customHeaders: config.customHeaders,
+        })
+        break
+
       default:
-        throw new Error(`[AI Service Error] Unsupported provider: ${activeProvider}`);
+        throw new APIError(`Unsupported provider: ${providerId}`)
     }
 
-    console.log(`[AI Service | ${translator.providerName}] Translating batch of ${texts.length} item(s)...`);
-    const startTime = Date.now();
+    console.log(`[AI Service | ${translator.providerName}] Translating batch of ${texts.length} item(s)...`)
+    const startTime = Date.now()
 
     try {
-      const result = await translator.translate(texts, settings, glossaryText);
-
-      const duration = Date.now() - startTime;
-      console.log(`[AI Service | ${translator.providerName}] Translation OK for ${texts.length} item(s) (${duration}ms).`);
-
-      return result;
+      const result = await translator.translate(texts, settings, glossaryText, contextHistory)
+      const duration = Date.now() - startTime
+      console.log(`[AI Service | ${translator.providerName}] OK for ${texts.length} item(s) (${duration}ms).`)
+      return result
     } catch (error) {
-      console.error(`[AI Service | ${translator.providerName}] Translation error:`, error);
-      throw error;
+      console.error(`[AI Service | ${translator.providerName}] Error:`, error)
+      throw error
     }
   }
 
-  static async listModels(providerOverride?: string): Promise<string[]> {
-    const settings = getSettings();
-    const activeProvider = (providerOverride || settings.activeProvider || 'gemini').toLowerCase();
-    const apiKey = settings.apiKeys[activeProvider as keyof typeof settings.apiKeys];
+  /**
+   * Retry translation with self-correction prompt.
+   * Shows the AI its bad translations along with specific errors.
+   */
+  static async translateBatchWithRetry(
+    texts: string[],
+    glossaryText: string,
+    previousErrors: string[],
+    attempt: number = 0
+  ): Promise<string[]> {
+    const settings = getSettings()
+    const { providerId, config } = getActiveProviderConfig()
 
-    const defaults = DEFAULT_MODELS[activeProvider] || DEFAULT_MODELS['gemini'];
-
-    if (!apiKey) {
-      return defaults;
+    if (!config.apiKey) {
+      throw new APIError(`Missing API Key for provider: ${providerId.toUpperCase()}`)
     }
+
+    const modelId = config.modelId || DEFAULT_MODELS[providerId]?.[0] || ''
+
+    // Build self-correction prompt with original texts, bad translations, and errors
+    const correctionPrompt = `You are fixing a translation from English to ${settings.targetLanguage}.
+
+CRITICAL ERRORS found in the previous translation:
+${previousErrors.map(e => `- ${e}`).join('\n')}
+
+INSTRUCTIONS:
+1. Return ONLY a valid JSON array of translated strings.
+2. Do NOT translate, remove, or modify [variables] or {tags}.
+3. The output array MUST have exactly ${texts.length} elements.
+4. Fix the errors listed above.
+${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
+
+    switch (providerId) {
+      case 'gemini': {
+        const genAI = new GoogleGenerativeAI(config.apiKey)
+        const responseSchema: Schema = {
+          type: SchemaType.ARRAY,
+          items: { type: SchemaType.STRING }
+        }
+        const model = genAI.getGenerativeModel({
+          model: modelId,
+          systemInstruction: correctionPrompt,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema,
+            temperature: Math.max(0, settings.temperature - 0.1 * (attempt + 1)),
+          }
+        })
+        const result = await model.generateContent(`Translate these to ${settings.targetLanguage}:\n${JSON.stringify(texts)}`)
+        return JSON.parse(result.response.text())
+      }
+
+      case 'claude': {
+        const translator = new ClaudeTranslator(config.apiKey, modelId, config.baseURL || undefined)
+        return translator.translate(texts, { ...settings, userCustomPrompt: correctionPrompt }, glossaryText)
+      }
+
+      case 'openai_compatible': {
+        const translator = new OpenAICompatibleTranslator({
+          baseURL: config.baseURL || 'https://api.openai.com/v1',
+          apiKey: config.apiKey,
+          modelId,
+          customHeaders: config.customHeaders,
+        })
+        return translator.translate(texts, { ...settings, userCustomPrompt: correctionPrompt }, glossaryText)
+      }
+
+      default:
+        throw new APIError(`Unsupported provider: ${providerId}`)
+    }
+  }
+
+  /**
+   * List available models for a given provider.
+   */
+  static async listModels(providerOverride?: string): Promise<string[]> {
+    const settings = getSettings()
+    const activeProvider = (providerOverride || settings.activeProviderId || 'gemini').toLowerCase()
+    const config = settings.providers[activeProvider as keyof typeof settings.providers]
+    const apiKey = config?.apiKey || ''
+
+    const defaults = DEFAULT_MODELS[activeProvider] || DEFAULT_MODELS['gemini']
+
+    if (!apiKey) return defaults
 
     if (activeProvider === 'gemini') {
       try {
         const url = new URL('https://generativelanguage.googleapis.com/v1beta/models')
         url.searchParams.set('key', apiKey)
-
         const response = await fetch(url.toString())
-        if (!response.ok) {
-          return defaults;
-        }
+        if (!response.ok) return defaults
 
-        const data = (await response.json()) as {
-          models?: Array<{
-            name?: string
-            supportedGenerationMethods?: string[]
-          }>
+        const data = await response.json() as {
+          models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
         }
 
         const remoteModels = (data.models || [])
-          .filter((model) => (model.supportedGenerationMethods || []).includes('generateContent'))
-          .map((model) => (model.name || '').replace('models/', ''))
-          .filter((name) => name.length > 0);
+          .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+          .map((m) => (m.name || '').replace('models/', ''))
+          .filter((n) => n.length > 0)
 
-        if (remoteModels.length > 0) {
-          return remoteModels;
-        }
+        return remoteModels.length > 0 ? remoteModels : defaults
       } catch {
-        return defaults;
+        return defaults
       }
     }
 
-    if (activeProvider === 'gpt' || activeProvider === 'openai') {
+    if (activeProvider === 'openai_compatible') {
+      const base = (config?.baseURL || 'https://api.openai.com/v1').replace(/\/+$/, '')
       try {
-        const response = await fetch('https://api.openai.com/v1/models', {
+        const response = await fetch(`${base}/models`, {
           headers: { 'Authorization': `Bearer ${apiKey}` }
-        });
-        if (!response.ok) {
-          return defaults;
-        }
-        const data = await response.json();
-        const remoteModels = (data.data || [])
-          .map((m: { id: string }) => m.id)
-          .filter((id: string) => id.includes('gpt') || id.includes('o1') || id.includes('o3'));
-        if (remoteModels.length > 0) {
-          return remoteModels;
-        }
+        })
+        if (!response.ok) return defaults
+        const data = await response.json()
+        const remoteModels = (data.data || []).map((m: { id: string }) => m.id)
+        return remoteModels.length > 0 ? remoteModels : defaults
       } catch {
-        return defaults;
+        return defaults
       }
     }
 
@@ -460,58 +381,18 @@ export class AIService {
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01'
           }
-        });
-        if (!response.ok) {
-          return defaults;
-        }
-        const data = await response.json();
+        })
+        if (!response.ok) return defaults
+        const data = await response.json()
         const remoteModels = (data.data || [])
           .map((m: { id: string }) => m.id)
-          .filter((id: string) => id.includes('claude'));
-        if (remoteModels.length > 0) {
-          return remoteModels;
-        }
+          .filter((id: string) => id.includes('claude'))
+        return remoteModels.length > 0 ? remoteModels : defaults
       } catch {
-        return defaults;
+        return defaults
       }
     }
 
-    if (activeProvider === 'deepseek') {
-      try {
-        const response = await fetch('https://api.deepseek.com/v1/models', {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
-        });
-        if (!response.ok) {
-          return defaults;
-        }
-        const data = await response.json();
-        const remoteModels = (data.data || []).map((m: { id: string }) => m.id);
-        if (remoteModels.length > 0) {
-          return remoteModels;
-        }
-      } catch {
-        return defaults;
-      }
-    }
-
-    if (activeProvider === 'grok') {
-      try {
-        const response = await fetch('https://api.x.ai/v1/models', {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
-        });
-        if (!response.ok) {
-          return defaults;
-        }
-        const data = await response.json();
-        const remoteModels = (data.data || []).map((m: { id: string }) => m.id);
-        if (remoteModels.length > 0) {
-          return remoteModels;
-        }
-      } catch {
-        return defaults;
-      }
-    }
-
-    return defaults;
+    return defaults
   }
 }

@@ -5,14 +5,14 @@
  * Debounce 500ms trước khi gọi update DB.
  */
 import { useCallback, useRef, type ReactElement } from 'react'
-import { Sparkles, RotateCcw, Check, AlertTriangle } from 'lucide-react'
+import { Sparkles, RotateCcw, Check, AlertTriangle, GitBranch } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { cn } from '@renderer/lib/utils'
 
-export type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning'
+export type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning' | 'skipped' | 'modified'
 
 export interface UITranslationBlock {
   id: number
@@ -32,6 +32,9 @@ interface TranslationCardProps {
   onApprove: (blockId: number) => void
   onRevert: (blockId: number) => void
   onAITranslate: (blockId: number) => void
+  /** Multi-select props */
+  isSelected?: boolean
+  onSelect?: (blockId: number, event: React.MouseEvent) => void
 }
 
 const statusConfig: Record<BlockStatus, { label: string; className: string }> = {
@@ -39,6 +42,8 @@ const statusConfig: Record<BlockStatus, { label: string; className: string }> = 
   draft:    { label: 'Draft',    className: 'bg-info/20 text-info border-info/30' },
   approved: { label: 'Approved', className: 'bg-success/20 text-success border-success/30' },
   warning:  { label: 'Warning',  className: 'bg-warning/20 text-warning border-warning/30' },
+  skipped:  { label: 'Skipped',  className: 'bg-muted/30 text-muted-foreground border-border/30' },
+  modified: { label: 'Modified', className: 'bg-amber-500/20 text-amber-500 border-amber-500/30' },
 }
 
 const DEBOUNCE_MS = 500
@@ -57,6 +62,8 @@ export function TranslationCard({
   onApprove,
   onRevert,
   onAITranslate,
+  isSelected,
+  onSelect,
 }: TranslationCardProps): ReactElement {
   const config = statusConfig[block.status]
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -80,12 +87,40 @@ export function TranslationCard({
       className={cn(
         'rounded-md border bg-card transition-colors',
         block.status === 'warning' && 'border-warning/40',
-        block.status === 'approved' && 'border-success/20'
+        block.status === 'approved' && 'border-success/20',
+        block.status === 'modified' && 'border-amber-500/40',
+        isSelected && 'border-primary/40 bg-primary/[0.04]'
       )}
     >
       {/* Card Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/50 bg-surface-elevated/50">
+      <div
+        className={cn(
+          'flex items-center justify-between px-3 py-2 border-b border-border/50 bg-surface-elevated/50',
+          onSelect && 'cursor-pointer hover:bg-accent/50 transition-colors'
+        )}
+        onClick={onSelect ? (e) => onSelect(block.id, e.nativeEvent as unknown as React.MouseEvent) : undefined}
+      >
         <div className="flex items-center gap-2">
+          {onSelect && (
+            <div
+              className={cn(
+                'flex items-center justify-center size-5 rounded border transition-colors flex-shrink-0',
+                isSelected
+                  ? 'bg-primary border-primary text-primary-foreground'
+                  : 'border-border/50 bg-background hover:border-primary/50'
+              )}
+              role="checkbox"
+              aria-checked={!!isSelected}
+              aria-label={`Select block ${block.id}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isSelected && (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </div>
+          )}
           {block.character_id && (
             <Badge variant="secondary" className="h-5 px-2 text-[10px] font-semibold bg-primary/15 text-primary border-0">
               {block.character_id}
@@ -142,6 +177,14 @@ export function TranslationCard({
               <AlertTriangle className="size-3 text-warning" />
               <span className="text-[11px] text-warning">
                 Missing tags — sẽ fallback về bản gốc khi Export
+              </span>
+            </>
+          )}
+          {block.status === 'modified' && (
+            <>
+              <GitBranch className="size-3 text-amber-500" />
+              <span className="text-[11px] text-amber-500">
+                Source text changed in game update — review needed
               </span>
             </>
           )}

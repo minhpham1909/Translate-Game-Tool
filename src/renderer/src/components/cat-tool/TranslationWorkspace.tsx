@@ -5,6 +5,7 @@
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { TranslationCard, UITranslationBlock, BlockStatus } from './TranslationCard'
+import { FloatingActionBar } from './FloatingActionBar'
 
 interface TranslationWorkspaceProps {
   blocks: UITranslationBlock[]
@@ -12,6 +13,8 @@ interface TranslationWorkspaceProps {
   onApprove: (blockId: number) => void
   onRevert: (blockId: number) => void
   onAITranslate: (blockId: number) => void
+  onBatchTranslate?: (blockIds: number[]) => void
+  onBatchApprove?: (blockIds: number[]) => void
 }
 
 type FilterTab = 'all' | BlockStatus
@@ -21,6 +24,7 @@ const TABS: { id: FilterTab; label: string }[] = [
   { id: 'empty',    label: 'Empty' },
   { id: 'draft',    label: 'Draft' },
   { id: 'approved', label: 'Approved' },
+  { id: 'modified', label: 'Modified' },
   { id: 'warning',  label: 'Warning' },
 ]
 
@@ -37,10 +41,18 @@ export function TranslationWorkspace({
   onApprove,
   onRevert,
   onAITranslate,
+  onBatchTranslate,
+  onBatchApprove,
 }: TranslationWorkspaceProps) {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all')
   const [renderedCount, setRenderedCount] = useState(RENDER_CHUNK_SIZE)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [lastClickedId, setLastClickedId] = useState<number | null>(null)
   const loaderRef = useRef<HTMLDivElement | null>(null)
+
+  // Map block.id to its index for shift-click range selection
+  const blockIndexMap = new Map<number, number>()
+  blocks.forEach((b, idx) => blockIndexMap.set(b.id, idx))
 
   // Lọc theo tab
   const filteredBlocks = activeFilter === 'all'
@@ -53,6 +65,8 @@ export function TranslationWorkspace({
   // Reset về đầu mỗi khi đổi filter
   useEffect(() => {
     setRenderedCount(RENDER_CHUNK_SIZE)
+    setSelectedIds(new Set())
+    setLastClickedId(null)
   }, [activeFilter, blocks])
 
   // IntersectionObserver: load thêm khi loader div vào viewport
@@ -75,14 +89,58 @@ export function TranslationWorkspace({
     }
   }, [handleObserver])
 
+  // Multi-select handler with shift-click support
+  const handleSelect = useCallback((blockId: number, _event: React.MouseEvent) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (_event.shiftKey && lastClickedId !== null) {
+        // Range select
+        const startIdx = blockIndexMap.get(lastClickedId) ?? 0
+        const endIdx = blockIndexMap.get(blockId) ?? 0
+        const lo = Math.min(startIdx, endIdx)
+        const hi = Math.max(startIdx, endIdx)
+        for (let i = lo; i <= hi; i++) {
+          next.add(blocks[i].id)
+        }
+      } else {
+        if (next.has(blockId)) {
+          next.delete(blockId)
+        } else {
+          next.add(blockId)
+        }
+      }
+      setLastClickedId(blockId)
+      return next
+    })
+  }, [blocks, blockIndexMap, lastClickedId])
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setLastClickedId(null)
+  }, [])
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedIds(new Set(visibleBlocks.map((b) => b.id)))
+    setLastClickedId(visibleBlocks[0]?.id ?? null)
+  }, [visibleBlocks])
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedIds(new Set())
+    setLastClickedId(null)
+  }, [])
+
   // Đếm theo từng status để hiển thị badge
   const counts: Record<FilterTab, number> = {
     all:      blocks.length,
     empty:    blocks.filter((b) => b.status === 'empty').length,
     draft:    blocks.filter((b) => b.status === 'draft').length,
     approved: blocks.filter((b) => b.status === 'approved').length,
+    modified: blocks.filter((b) => b.status === 'modified').length,
     warning:  blocks.filter((b) => b.status === 'warning').length,
+    skipped:  blocks.filter((b) => b.status === 'skipped').length,
   }
+
+  const selectedCount = selectedIds.size
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-background">
@@ -103,8 +161,31 @@ export function TranslationWorkspace({
             <span className="ml-1.5 text-[10px] opacity-70">({counts[tab.id]})</span>
           </button>
         ))}
-        <div className="ml-auto text-[11px] text-muted-foreground">
-          Hiển thị {visibleBlocks.length} / {filteredBlocks.length}
+        <div className="ml-auto flex items-center gap-2">
+          {selectedCount > 0 && (
+            <button
+              id="btn-deselect-all"
+              onClick={handleDeselectAll}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Deselect all
+            </button>
+          )}
+          {selectedCount === 0 && visibleBlocks.length > 0 && (
+            <button
+              id="btn-select-all"
+              onClick={handleSelectAll}
+              className="text-[11px] text-muted-foreground hover:text-primary transition-colors"
+            >
+              Select all ({visibleBlocks.length})
+            </button>
+          )}
+          <span className="text-[11px] text-muted-foreground">
+            {selectedCount > 0
+              ? `${selectedCount} selected · `
+              : ''}
+            Hiển thị {visibleBlocks.length} / {filteredBlocks.length}
+          </span>
         </div>
       </div>
 
@@ -127,6 +208,8 @@ export function TranslationWorkspace({
                   onApprove={onApprove}
                   onRevert={onRevert}
                   onAITranslate={onAITranslate}
+                  isSelected={selectedIds.has(block.id)}
+                  onSelect={handleSelect}
                 />
               ))}
 
@@ -142,6 +225,17 @@ export function TranslationWorkspace({
           )}
         </div>
       </div>
+
+      {/* Floating Action Bar */}
+      {selectedCount > 0 && onBatchTranslate && onBatchApprove && (
+        <FloatingActionBar
+          selectedCount={selectedCount}
+          onBatchTranslate={() => onBatchTranslate(Array.from(selectedIds))}
+          onBatchApprove={() => onBatchApprove(Array.from(selectedIds))}
+          onClearSelection={handleClearSelection}
+          onSelectAll={handleSelectAll}
+        />
+      )}
     </div>
   )
 }

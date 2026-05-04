@@ -5,8 +5,11 @@ import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
 import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation } from './services/workspaceService'
 import { preFlightAnalyzer, startQueue, stopQueue, translateBatchByBlockIds } from './services/translationEngine'
+import { parseProjectDiff, previewDiff } from './services/parserService'
 import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
+import { getDatabase } from './store/database'
+import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -33,6 +36,26 @@ export function registerIpcHandlers(): void {
     })
     if (result.canceled) return null
     return result.filePaths[0] ?? null
+  })
+
+  ipcMain.handle('project:scanCompiled', async (_, gameDir: string) => {
+    return await scanCompiledFiles(gameDir)
+  })
+
+  ipcMain.handle('project:unpackGame', async (_, gameDir: string, mode?: 'extract' | 'decompile' | 'auto') => {
+    return await runUnpacker(gameDir, { mode })
+  })
+
+  ipcMain.handle('project:installUnpackerDeps', async () => {
+    return await installUnpackerDeps()
+  })
+
+  ipcMain.handle('project:previewDiff', async (_, newGameDir: string, sourceLanguage: string) => {
+    return await previewDiff(newGameDir, sourceLanguage)
+  })
+
+  ipcMain.handle('project:updateGame', async (_, newGameDir: string, sourceLanguage: string) => {
+    return await parseProjectDiff(newGameDir, sourceLanguage)
   })
 
   // --- Settings ---
@@ -112,6 +135,17 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('workspace:updateBlock', (_, blockId: number, text: string | null, status: string) => {
     return updateBlockTranslation(blockId, text, status)
+  })
+
+  ipcMain.handle('workspace:batchApprove', async (_, blockIds: number[]) => {
+    const db = getDatabase()
+    const stmt = db.prepare(`UPDATE translation_blocks SET status = 'approved' WHERE id = ?`)
+    const updateMany = db.transaction((ids: number[]) => {
+      for (const id of ids) {
+        stmt.run(id)
+      }
+    })
+    updateMany(blockIds)
   })
 
   // --- Engine (AI Translation) ---

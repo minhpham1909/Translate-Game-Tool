@@ -1,6 +1,6 @@
 import fs from 'fs-extra'
 import path from 'path'
-import { parseRpyFile, importRpyToDatabase } from '../parser/rpyParser'
+import { parseRpyFile, importRpyToDatabase, importRpyToDatabaseDiff, type DiffSummary } from '../parser/rpyParser'
 import { getDatabase } from '../store/database'
 
 /**
@@ -119,5 +119,138 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
   console.log(`[ParserService] Parse complete ${processedFiles}/${rpyFiles.length} files. Total blocks=${totalBlocks}`)
   if (processedFiles === 0) {
     throw new Error('No .rpy files could be parsed. Check logs for details.')
+  }
+}
+
+/**
+ * Parse a new game version and diff against existing DB.
+ * This preserves existing translations, marks changed blocks as 'modified',
+ * and adds new blocks as 'empty'.
+ *
+ * @param newGameFolderPath Path to the updated game/ folder
+ * @param sourceLanguage Language code (e.g., 'english')
+ * @returns DiffSummary with counts of unchanged/modified/new/removed blocks
+ */
+export async function parseProjectDiff(
+  newGameFolderPath: string,
+  sourceLanguage: string
+): Promise<DiffSummary> {
+  const targetDir = path.join(newGameFolderPath, 'tl', sourceLanguage)
+
+  const exists = await fs.pathExists(targetDir)
+  if (!exists) {
+    throw new Error(`Thư mục ngôn ngữ không tồn tại: ${targetDir}`)
+  }
+
+  // Get all .rpy files in the NEW game folder
+  const newRpyFiles = await getAllFiles(targetDir, '.rpy')
+  if (newRpyFiles.length === 0) {
+    throw new Error(`Không tìm thấy file .rpy nào trong thư mục ${targetDir}`)
+  }
+
+  // Build a map of existing file_paths → old file IDs
+  const db = getDatabase()
+  const existingFiles = db.prepare('SELECT id, file_path FROM files').all() as Array<{ id: number; file_path: string }>
+  const oldFileIdMap = new Map<string, number>()
+  for (const f of existingFiles) {
+    oldFileIdMap.set(f.file_path, f.id)
+  }
+
+  const summary: DiffSummary = {
+    unchanged: 0,
+    modified: 0,
+    newBlocks: 0,
+    removed: 0,
+    totalFiles: 0,
+  }
+
+  let processedFiles = 0
+
+  // Parse and diff each file
+  for (const filePath of newRpyFiles) {
+    try {
+      const relativePath = path.relative(targetDir, filePath)
+      const parseResult = await parseRpyFile(filePath, relativePath)
+
+      // Find the old file ID by relative path
+      const oldFileId = oldFileIdMap.get(relativePath) ?? null
+
+      const fileDiff = importRpyToDatabaseDiff(parseResult, oldFileId)
+
+      summary.unchanged += fileDiff.unchanged
+      summary.modified += fileDiff.modified
+      summary.newBlocks += fileDiff.newBlocks
+      summary.totalFiles++
+
+      processedFiles++
+    } catch (error) {
+      console.error(`[ParserService] Failed to diff file ${filePath}:`, error)
+    }
+  }
+
+  // Count removed blocks (old files that no longer exist in new version)
+  const newRelativePaths = new Set(newRpyFiles.map((f) => path.relative(targetDir, f)))
+  for (const oldFile of existingFiles) {
+    if (!newRelativePaths.has(oldFile.file_path)) {
+      // This old file no longer exists — remove its blocks
+      const blockCount = db.prepare('SELECT COUNT(*) as c FROM translation_blocks WHERE file_id = ?').get(oldFile.id) as { c: number }
+      summary.removed += blockCount.c
+      db.prepare('DELETE FROM files WHERE id = ?').run(oldFile.id)
+      db.prepare('DELETE FROM translation_blocks WHERE file_id = ?').run(oldFile.id)
+    }
+  }
+
+  console.log(`[ParserService] Diff complete: ${processedFiles}/${newRpyFiles.length} files processed`)
+  console.log(`[ParserService] Summary: ${summary.unchanged} unchanged, ${summary.modified} modified, ${summary.newBlocks} new, ${summary.removed} removed`)
+
+  if (processedFiles === 0) {
+    throw new Error('No .rpy files could be parsed. Check logs for details.')
+  }
+
+  return summary
+}
+
+/**
+ * Analyze what would change if we re-parsed a new game folder (dry run).
+ * Returns a preview without modifying the database.
+ */
+export async function previewDiff(
+  newGameFolderPath: string,
+  sourceLanguage: string
+): Promise<{
+  newFileCount: number
+  existingFileCount: number
+  removedFileCount: number
+  totalNewRpyFiles: number
+}> {
+  const targetDir = path.join(newGameFolderPath, 'tl', sourceLanguage)
+
+  const exists = await fs.pathExists(targetDir)
+  if (!exists) {
+    throw new Error(`Thư mục ngôn ngữ không tồn tại: ${targetDir}`)
+  }
+
+  const newRpyFiles = await getAllFiles(targetDir, '.rpy')
+  const newRelativePaths = new Set(newRpyFiles.map((f) => path.relative(targetDir, f)))
+
+  const db = getDatabase()
+  const existingFiles = db.prepare('SELECT file_path FROM files').all() as Array<{ file_path: string }>
+
+  let existingFileCount = 0
+  let removedFileCount = 0
+
+  for (const ef of existingFiles) {
+    if (newRelativePaths.has(ef.file_path)) {
+      existingFileCount++
+    } else {
+      removedFileCount++
+    }
+  }
+
+  return {
+    newFileCount: newRpyFiles.length - existingFileCount,
+    existingFileCount,
+    removedFileCount,
+    totalNewRpyFiles: newRpyFiles.length,
   }
 }
