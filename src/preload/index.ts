@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { AppSettings, ProjectConfig, RecentProject } from '../shared/types'
+import type { AppSettings, ProjectConfig, RecentProject, ExportFileEntry } from '../shared/types'
 
 type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning' | 'skipped' | 'modified'
 
@@ -107,10 +107,26 @@ interface DiffSummary {
   totalFiles: number
 }
 
+interface BackupEntry {
+  fileId: number
+  fileName: string
+  backupPath: string
+  createdAt: string
+  fileSize: number
+}
+
+interface ExportResult {
+  exportedFiles: number
+  totalFiles: number
+  skippedFiles: number
+  errors: string[]
+}
+
 interface RendererApi {
   project: {
     scanLanguages: (gamePath: string) => Promise<string[]>
-    setup: (config: ProjectConfig) => Promise<void>
+    setup: (config: ProjectConfig, forceReparse?: boolean) => Promise<void>
+    open: (config: ProjectConfig) => Promise<void>
     getCurrent: () => Promise<ProjectConfig | null>
     selectFolder: () => Promise<string | null>
     getRecent: () => Promise<RecentProject[]>
@@ -164,6 +180,14 @@ interface RendererApi {
     save: (settings: Partial<AppSettings>) => Promise<void>
     testConnection: () => Promise<{ ok: boolean; error?: string }>
     listModels: (provider?: string) => Promise<string[]>
+    selectDbFolder: () => Promise<string | null>
+  }
+  export: {
+    getFilesWithChanges: () => Promise<ExportFileEntry[]>
+    exportAll: (approvedOnly: boolean) => Promise<ExportResult>
+    exportSelected: (fileIds: number[], approvedOnly: boolean) => Promise<ExportResult>
+    listBackups: () => Promise<BackupEntry[]>
+    restoreBackup: (fileId: number, backupPath: string) => Promise<void>
   }
 }
 
@@ -171,7 +195,8 @@ interface RendererApi {
 const api: RendererApi = {
   project: {
     scanLanguages: (gamePath: string) => ipcRenderer.invoke('project:scanLanguages', gamePath),
-    setup: (config: ProjectConfig) => ipcRenderer.invoke('project:setup', config) as Promise<void>,
+    setup: (config: ProjectConfig, forceReparse?: boolean) => ipcRenderer.invoke('project:setup', config, forceReparse) as Promise<void>,
+    open: (config: ProjectConfig) => ipcRenderer.invoke('project:open', config) as Promise<void>,
     getCurrent: () => ipcRenderer.invoke('project:getCurrent') as Promise<ProjectConfig | null>,
     selectFolder: () => ipcRenderer.invoke('project:selectFolder') as Promise<string | null>,
     getRecent: () => ipcRenderer.invoke('project:getRecent') as Promise<RecentProject[]>,
@@ -250,7 +275,15 @@ const api: RendererApi = {
     get: () => ipcRenderer.invoke('settings:get') as Promise<AppSettings>,
     save: (settings: Partial<AppSettings>) => ipcRenderer.invoke('settings:save', settings) as Promise<void>,
     testConnection: () => ipcRenderer.invoke('settings:testConnection') as Promise<{ ok: boolean; error?: string }>,
-    listModels: (provider?: string) => ipcRenderer.invoke('settings:listModels', provider) as Promise<string[]>
+    listModels: (provider?: string) => ipcRenderer.invoke('settings:listModels', provider) as Promise<string[]>,
+    selectDbFolder: () => ipcRenderer.invoke('settings:selectDbFolder') as Promise<string | null>
+  },
+  export: {
+    getFilesWithChanges: () => ipcRenderer.invoke('export:getFilesWithChanges') as Promise<ExportFileEntry[]>,
+    exportAll: (approvedOnly: boolean) => ipcRenderer.invoke('export:exportAll', approvedOnly) as Promise<ExportResult>,
+    exportSelected: (fileIds: number[], approvedOnly: boolean) => ipcRenderer.invoke('export:exportSelected', fileIds, approvedOnly) as Promise<ExportResult>,
+    listBackups: () => ipcRenderer.invoke('export:listBackups') as Promise<BackupEntry[]>,
+    restoreBackup: (fileId: number, backupPath: string) => ipcRenderer.invoke('export:restoreBackup', fileId, backupPath) as Promise<void>
   }
 }
 

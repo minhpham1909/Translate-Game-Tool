@@ -3,8 +3,8 @@
  * Modal cài đặt toàn cục, kết nối vào AppSettings (Phase 5 schema).
  * Có 4 tab: AI & API, Prompt & Logic, Translation Memory, System.
  */
-import { useEffect, useState } from 'react'
-import { Bot, Wand2, Database, Settings2, Eye, EyeOff, Sun, Moon, Monitor, Filter, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Bot, Wand2, Database, Settings2, Eye, EyeOff, Sun, Moon, Monitor, Filter, Plus, Trash2, Search, Check, ChevronDown } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@renderer/components/ui/dialog'
@@ -14,11 +14,12 @@ import { Label } from '@renderer/components/ui/label'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { Slider } from '@renderer/components/ui/slider'
 import { Switch } from '@renderer/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { useTheme } from '@renderer/context/ThemeContext'
 import { useNotification } from '@renderer/context/NotificationContext'
 import { cn } from '@renderer/lib/utils'
+import { TARGET_LANGUAGES, normalizeLanguageCode } from '../../../../shared/types'
 import type { ActiveProviderId, AIProviderConfig, BlacklistPattern } from '../../../../shared/types'
 
 type SettingsTab = 'ai-api' | 'prompt-logic' | 'translation-memory' | 'text-filter' | 'system'
@@ -49,6 +50,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [showApiKey, setShowApiKey] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [modelSearch, setModelSearch] = useState('')
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
 
   // Provider state
   const [providerId, setProviderId] = useState<ActiveProviderId>('gemini')
@@ -68,7 +72,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   }
 
   // Prompt & Logic
-  const [targetLanguage, setTargetLanguage] = useState('Tiếng Việt')
+  const [targetLanguageCode, setTargetLanguageCode] = useState('vietnamese')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [batchSize, setBatchSize] = useState('20')
   const [concurrentRequests, setConcurrentRequests] = useState('1')
@@ -95,6 +99,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   // Context Windowing
   const [contextWindowSize, setContextWindowSize] = useState([5])
 
+  // Database Storage
+  const [customDbFolder, setCustomDbFolder] = useState('')
+
+  // Language Patch
+  const [languagePatchKey, setLanguagePatchKey] = useState('K_F8')
+  const [languagePatchIcon, setLanguagePatchIcon] = useState(true)
+
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -115,7 +126,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       })
       setProviderId(settings.activeProviderId || 'gemini')
       setTemperature([settings.temperature ?? 0.2])
-      setTargetLanguage(settings.targetLanguage || 'Tiếng Việt')
       setSystemPrompt(settings.userCustomPrompt || '')
       setBatchSize(String(settings.batchSize ?? 20))
       setConcurrentRequests(String(settings.concurrentRequests ?? 1))
@@ -130,6 +140,14 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setEnableLengthCheck(settings.enableLengthCheck ?? true)
       setMaxLengthRatio([settings.maxLengthRatio ?? 1.3])
       setContextWindowSize([settings.contextWindowSize ?? 5])
+      setCustomDbFolder(settings.customDbFolder || '')
+      setLanguagePatchKey(settings.languagePatchKey || 'K_F8')
+      setLanguagePatchIcon(settings.languagePatchIcon !== false)
+
+      // Normalize target language to code (backward compat with display names)
+      const rawLang = settings.targetLanguage || 'vietnamese'
+      const normalized = normalizeLanguageCode(rawLang)
+      setTargetLanguageCode(normalized)
     })
     return () => { cancelled = true }
   }, [open])
@@ -157,12 +175,34 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     return () => { cancelled = true }
   }, [open, providerId])
 
+  // Close model dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Filtered models based on search
+  const filteredModels = modelSearch.trim()
+    ? availableModels.filter((m) => m.toLowerCase().includes(modelSearch.toLowerCase()))
+    : availableModels
+
+  const handleSelectModel = useCallback((modelId: string) => {
+    setField('modelId', modelId)
+    setModelSearch('')
+    setModelDropdownOpen(false)
+  }, [])
+
   const handleSave = async (): Promise<void> => {
     await window.api.settings.save({
       providers: providerConfigs,
       activeProviderId: providerId,
       temperature: temperature[0],
-      targetLanguage,
+      targetLanguage: targetLanguageCode,
       userCustomPrompt: systemPrompt,
       batchSize: Number(batchSize) || 20,
       concurrentRequests: Number(concurrentRequests) || 1,
@@ -177,6 +217,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       enableLengthCheck,
       maxLengthRatio: maxLengthRatio[0],
       contextWindowSize: contextWindowSize[0],
+      customDbFolder,
+      languagePatchKey,
+      languagePatchIcon,
       theme,
     })
     onOpenChange(false)
@@ -288,27 +331,81 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   </div>
 
                   {/* Model Selection */}
-                  <div className="space-y-2">
-                    <Label htmlFor="select-model">Model</Label>
-                    <Select
-                      value={currentConfig?.modelId || ''}
-                      onValueChange={(v) => setField('modelId', v)}
-                    >
-                      <SelectTrigger id="select-model" className="w-full">
-                        <SelectValue placeholder="Select model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableModels.length > 0 ? (
-                          availableModels.map((model) => (
-                            <SelectItem key={model} value={model}>{model}</SelectItem>
-                          ))
-                        ) : currentConfig?.modelId ? (
-                          <SelectItem value={currentConfig.modelId}>{currentConfig.modelId}</SelectItem>
-                        ) : (
-                          <SelectItem value="none">No models available</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-2" ref={modelDropdownRef}>
+                    <Label>Model</Label>
+                    <div className="relative">
+                      {/* Trigger */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModelDropdownOpen(!modelDropdownOpen)
+                          setModelSearch('')
+                        }}
+                        className="w-full h-9 px-3 text-left text-sm rounded-md border border-input bg-background hover:bg-accent/50 focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-between gap-2"
+                      >
+                        <span className={cn('truncate', currentConfig?.modelId ? 'text-foreground' : 'text-muted-foreground')}>
+                          {currentConfig?.modelId || 'Select model'}
+                        </span>
+                        <ChevronDown className={cn('size-4 text-muted-foreground flex-shrink-0 transition-transform', modelDropdownOpen && 'rotate-180')} />
+                      </button>
+
+                      {/* Dropdown */}
+                      {modelDropdownOpen && (
+                        <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-md shadow-lg overflow-hidden">
+                          {/* Search */}
+                          <div className="p-2 border-b border-border">
+                            <div className="relative">
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                              <Input
+                                autoFocus
+                                placeholder="Search models..."
+                                value={modelSearch}
+                                onChange={(e) => setModelSearch(e.target.value)}
+                                className="h-7 text-xs pl-8"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape') setModelDropdownOpen(false)
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Model List */}
+                          <ScrollArea className="max-h-80">
+                            <div className="p-1">
+                              {filteredModels.length > 0 ? (
+                                filteredModels.map((model) => (
+                                  <button
+                                    key={model}
+                                    type="button"
+                                    onClick={() => handleSelectModel(model)}
+                                    className={cn(
+                                      'w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-accent transition-colors',
+                                      model === currentConfig?.modelId && 'bg-accent'
+                                    )}
+                                  >
+                                    <Check className={cn('size-3.5 flex-shrink-0', model === currentConfig?.modelId ? 'text-primary' : 'text-transparent')} />
+                                    <span className="truncate">{model}</span>
+                                  </button>
+                                ))
+                              ) : currentConfig?.modelId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectModel(currentConfig.modelId)}
+                                  className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-accent transition-colors bg-accent"
+                                >
+                                  <Check className="size-3.5 flex-shrink-0 text-primary" />
+                                  <span className="truncate">{currentConfig.modelId}</span>
+                                </button>
+                              ) : (
+                                <div className="px-2 py-4 text-center text-xs text-muted-foreground italic">
+                                  {modelSearch.trim() ? 'No matching models' : 'No models available'}
+                                </div>
+                              )}
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {providerId === 'openai_compatible'
                         ? 'Auto-detected from endpoint. Enter manually if using custom LLM.'
@@ -393,13 +490,22 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               {activeTab === 'prompt-logic' && (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="input-target-lang">Target Language</Label>
-                    <Input
-                      id="input-target-lang"
-                      value={targetLanguage}
-                      onChange={(e) => setTargetLanguage(e.target.value)}
-                      placeholder="e.g., Tiếng Việt, Japanese"
-                    />
+                    <Label htmlFor="select-target-lang">Target Language</Label>
+                    <Select value={targetLanguageCode} onValueChange={setTargetLanguageCode}>
+                      <SelectTrigger id="select-target-lang">
+                        <SelectValue placeholder="Chọn ngôn ngữ đích..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TARGET_LANGUAGES.map((lang) => (
+                          <SelectItem key={lang.code} value={lang.code}>
+                            {lang.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Language AI will translate to. Used for folder path (ASCII-safe) and translate header.
+                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -664,6 +770,51 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               {activeTab === 'system' && (
                 <>
                   <div className="space-y-3">
+                    <Label>Language Patch Settings</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Cấu hình phương thức chuyển đổi ngôn ngữ trong game sau khi export.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Shortcut Key</Label>
+                        <Select
+                          value={languagePatchKey || 'K_F8'}
+                          onValueChange={(value) => {
+                            setLanguagePatchKey(value)
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="K_F8">F8</SelectItem>
+                            <SelectItem value="K_F9">F9</SelectItem>
+                            <SelectItem value="K_F10">F10</SelectItem>
+                            <SelectItem value="K_F11">F11</SelectItem>
+                            <SelectItem value="K_F12">F12</SelectItem>
+                            <SelectItem value="K_l">Shift + L</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] text-muted-foreground">
+                          Phím tắt trong game để mở Language Switcher
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Show 🔤 Icon</Label>
+                        <div className="flex items-center gap-2 pt-1">
+                          <Switch
+                            checked={languagePatchIcon !== false}
+                            onCheckedChange={(checked) => setLanguagePatchIcon(checked)}
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            Hiển thị icon ở góc phải trên để chọn ngôn ngữ
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
                     <Label>Interface Theme</Label>
                     <div className="grid grid-cols-3 gap-2">
                       {[
@@ -687,6 +838,45 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Database Storage Location</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={customDbFolder}
+                        onChange={(e) => setCustomDbFolder(e.target.value)}
+                        placeholder="Default: AppData/Local/vn-translator/db"
+                        className="flex-1 text-xs"
+                        readOnly
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs flex-shrink-0"
+                        onClick={async () => {
+                          const selected = await window.api.settings.selectDbFolder()
+                          if (selected) {
+                            setCustomDbFolder(selected)
+                          }
+                        }}
+                      >
+                        Browse...
+                      </Button>
+                      {customDbFolder && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs flex-shrink-0"
+                          onClick={() => setCustomDbFolder('')}
+                        >
+                          Reset
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Choose a custom folder to store SQLite database files. Empty = use default location. Each project gets its own file: <code className="bg-muted px-1 py-0.5 rounded">vnt_&lt;GameName&gt;.sqlite</code>
+                    </p>
                   </div>
 
                   <div className="p-4 rounded-lg border border-border bg-muted/30">

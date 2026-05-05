@@ -13,6 +13,7 @@
  */
 
 import { extractJsonArray, JSONParsingError } from '../../utils/jsonParser'
+import { getLanguageLabel } from '../../../shared/types'
 import { RateLimitError, TokenLimitError, ParsingError, APIError } from '../errors'
 import { AppSettings } from '../../../shared/types'
 import type { ContextBlock } from '../aiService'
@@ -255,11 +256,11 @@ ${userSystemPrompt}`
     if (texts.length === 0) return []
 
     const systemPrompt = this.buildSystemPrompt(
-      getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText),
+      getSystemPrompt(getLanguageLabel(settings.targetLanguage), settings.userCustomPrompt, glossaryText),
       contextHistory
     )
 
-    const userPrompt = `Translate the following array of strings to ${settings.targetLanguage}:\n${JSON.stringify(texts)}`
+    const userPrompt = `Translate the following array of strings to ${getLanguageLabel(settings.targetLanguage)}:\n${JSON.stringify(texts)}`
 
     const requestedMaxTokens = this.estimateMaxOutputTokens(texts)
 

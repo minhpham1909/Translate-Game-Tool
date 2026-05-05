@@ -1,5 +1,5 @@
 import { dialog, ipcMain } from 'electron'
-import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProjects } from './api/projectIpc'
+import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProjects, openProject } from './api/projectIpc'
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGlossaryEnabled } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
@@ -10,6 +10,7 @@ import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
 import { getDatabase, rebuildFtsTable } from './store/database'
 import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
+import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, listBackups, restoreFileBackup } from './services/exportService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -18,8 +19,12 @@ export function registerIpcHandlers(): void {
     return await scanAvailableLanguages(gamePath)
   })
 
-  ipcMain.handle('project:setup', (_, config: ProjectConfig) => {
-    return setupProject(config)
+  ipcMain.handle('project:setup', async (_, config: ProjectConfig, forceReparse?: boolean) => {
+    await setupProject(config, forceReparse ?? false)
+  })
+
+  ipcMain.handle('project:open', async (_, config: ProjectConfig) => {
+    await openProject(config)
   })
 
   ipcMain.handle('project:getCurrent', () => {
@@ -33,6 +38,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('project:selectFolder', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory']
+    })
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
+
+  ipcMain.handle('settings:selectDbFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Chọn thư mục lưu database SQLite',
+      properties: ['openDirectory', 'createDirectory']
     })
     if (result.canceled) return null
     return result.filePaths[0] ?? null
@@ -198,5 +212,26 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('engine:stopQueue', () => {
     return stopQueue()
+  })
+
+  // --- Export ---
+  ipcMain.handle('export:getFilesWithChanges', () => {
+    return getFilesWithChanges()
+  })
+
+  ipcMain.handle('export:exportAll', async (_, approvedOnly: boolean) => {
+    return await exportAllFiles(approvedOnly)
+  })
+
+  ipcMain.handle('export:exportSelected', async (_, fileIds: number[], approvedOnly: boolean) => {
+    return await exportSelectedFiles(fileIds, approvedOnly)
+  })
+
+  ipcMain.handle('export:listBackups', async () => {
+    return await listBackups()
+  })
+
+  ipcMain.handle('export:restoreBackup', async (_, fileId: number, backupPath: string) => {
+    await restoreFileBackup(fileId, backupPath)
   })
 }

@@ -44,7 +44,7 @@ const defaultSettings: AppSettings = {
   activeProviderId: 'gemini',
 
   // Group 2
-  targetLanguage: 'Tiếng Việt',
+  targetLanguage: 'vietnamese',
   temperature: 0.2,
   userCustomPrompt: '',
 
@@ -78,6 +78,13 @@ const defaultSettings: AppSettings = {
 
   // Group 9
   contextWindowSize: 5,
+
+  // Group 10
+  customDbFolder: '',
+
+  // Group 11: Language Patch
+  languagePatchKey: 'K_F8',
+  languagePatchIcon: true,
 }
 
 /**
@@ -221,6 +228,21 @@ export function getActiveProviderConfig(): { providerId: string; config: import(
   const settings = getSettings()
   const providerId = settings.activeProviderId
   return { providerId, config: settings.providers[providerId as keyof typeof settings.providers] }
+}
+
+/**
+ * Lấy đường dẫn thư mục lưu DB tùy chọn
+ */
+export function getCustomDbFolder(): string {
+  const settings = getSettings()
+  return settings.customDbFolder || ''
+}
+
+/**
+ * Lưu đường dẫn thư mục lưu DB tùy chọn
+ */
+export function saveCustomDbFolder(folderPath: string): void {
+  saveSettings({ customDbFolder: folderPath })
 }
 
 /**

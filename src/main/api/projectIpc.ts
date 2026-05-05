@@ -1,9 +1,9 @@
 import path from 'path'
 import fs from 'fs-extra'
 import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProjects, saveProjectConfig } from '../store/settings'
-import { ProjectConfig, RecentProject } from '../../shared/types'
+import { ProjectConfig, RecentProject, normalizeLanguageCode } from '../../shared/types'
 import { parseProject } from '../services/parserService'
-import { initDatabase } from '../store/database'
+import { initDatabase, getDatabase } from '../store/database'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -33,28 +33,79 @@ export async function scanAvailableLanguages(gameFolderPath: string): Promise<st
 }
 
 /**
- * Khởi tạo/Lưu Project mới
+ * Kiểm tra xem project đã được parse trước đó chưa (DB có files không).
  */
-export async function setupProject(config: ProjectConfig): Promise<void> {
-  // Validate cơ bản
+function isProjectAlreadyParsed(): boolean {
+  try {
+    const db = getDatabase()
+    const count = db.prepare('SELECT COUNT(*) as c FROM files').get() as { c: number }
+    return count.c > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Khởi tạo Project mới — Parse toàn bộ .rpy files vào DB.
+ * Nếu project đã được parse trước đó, sẽ KHÔNG parse lại (bảo toàn bản dịch).
+ * Dùng forceReparse = true để ép parse lại từ đầu.
+ */
+export async function setupProject(config: ProjectConfig, forceReparse: boolean = false): Promise<void> {
   if (!config.gameFolderPath || !config.sourceLanguage || !config.targetLanguage) {
     throw new Error('Missing Project Config fields.')
   }
 
-  if (config.sourceLanguage === config.targetLanguage) {
-    throw new Error('Target language must differ from source language.')
+  // Normalize target language to ASCII-safe code
+  const normalizedConfig = {
+    ...config,
+    targetLanguage: normalizeLanguageCode(config.targetLanguage),
   }
 
-  // Đảm bảo DB được khởi tạo trước khi parse
-  initDatabase()
+  if (normalizedConfig.sourceLanguage === normalizedConfig.targetLanguage) {
+    throw new Error('Target language phải khác ngôn ngữ nguồn.')
+  }
 
-  // Chạy parser quét file và nạp vào SQLite
-  await parseProject(config.gameFolderPath, config.sourceLanguage)
+  // Khởi tạo DB
+  initDatabase(normalizedConfig.gameFolderPath)
 
-  // Lưu cấu hình vào electron-store sau khi parse thành công
-  saveProjectConfig(config)
-  addRecentProject(config)
-  console.log('[ProjectSetup] Project config saved:', config)
+  // Nếu project đã được parse trước đó và không ép reparse → skip parsing
+  if (isProjectAlreadyParsed() && !forceReparse) {
+    console.log('[ProjectSetup] Project already parsed, skipping re-parse. Loading from existing DB.')
+    saveProjectConfig(normalizedConfig)
+    addRecentProject(normalizedConfig)
+    return
+  }
+
+  // Parse toàn bộ .rpy files → nạp vào DB
+  await parseProject(normalizedConfig.gameFolderPath, normalizedConfig.sourceLanguage)
+
+  // Lưu cấu hình
+  saveProjectConfig(normalizedConfig)
+  addRecentProject(normalizedConfig)
+  console.log('[ProjectSetup] Project setup complete:', normalizedConfig)
+}
+
+/**
+ * Mở lại project đã có — KHÔNG parse lại, chỉ load từ DB.
+ * Đảm bảo bản dịch không bị mất khi restart app.
+ */
+export async function openProject(config: ProjectConfig): Promise<void> {
+  if (!config.gameFolderPath || !config.sourceLanguage || !config.targetLanguage) {
+    throw new Error('Missing Project Config fields.')
+  }
+
+  // Normalize target language
+  const normalizedConfig = {
+    ...config,
+    targetLanguage: normalizeLanguageCode(config.targetLanguage),
+  }
+
+  // Chỉ khởi tạo DB connection, KHÔNG gọi parseProject
+  initDatabase(normalizedConfig.gameFolderPath)
+
+  // Update recent list
+  addRecentProject(normalizedConfig)
+  console.log('[ProjectSetup] Project opened from existing DB:', normalizedConfig)
 }
 
 /**
@@ -70,3 +121,4 @@ export function getCurrentProject(): ProjectConfig | null {
 export function getRecentProjects(): RecentProject[] {
   return readRecentProjects()
 }
+

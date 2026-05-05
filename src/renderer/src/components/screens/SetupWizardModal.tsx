@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Progress } from '@renderer/components/ui/progress'
 import { cn } from '@renderer/lib/utils'
 import { useNotification } from '@renderer/context/NotificationContext'
+import { TARGET_LANGUAGES } from '../../../../shared/types'
 
 type WizardStep = 1 | 2 | 3
 type ParseStatus = 'idle' | 'parsing' | 'success' | 'error'
@@ -357,13 +358,19 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="input-target-lang-wizard">Target Language</Label>
-                <Input
-                  id="input-target-lang-wizard"
-                  value={targetLanguage}
-                  onChange={(e) => setTargetLanguage(e.target.value)}
-                  placeholder="ví dụ: vietnamese, Tiếng Việt"
-                />
+                <Label htmlFor="select-target-lang-wizard">Target Language</Label>
+                <Select value={targetLanguage} onValueChange={setTargetLanguage}>
+                  <SelectTrigger id="select-target-lang-wizard">
+                    <SelectValue placeholder="Chọn ngôn ngữ đích..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TARGET_LANGUAGES.map((lang) => (
+                      <SelectItem key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-xs text-muted-foreground">
                   Ngôn ngữ AI sẽ dịch <span className="text-foreground font-medium">sang</span>.
                 </p>

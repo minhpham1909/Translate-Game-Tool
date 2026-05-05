@@ -6,6 +6,7 @@
 import {
   BarChart3, Search, Settings, Download, ChevronRight, Folder,
   Sun, Moon, Monitor, ShieldAlert, Database, BookMarked, Keyboard, RefreshCw,
+  ArrowLeft,
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -14,6 +15,7 @@ import { cn } from '@renderer/lib/utils'
 
 interface TopHeaderProps {
   activeFileName?: string
+  gameFolderPath?: string
   sourceLanguage?: string
   onSettingsClick: () => void
   onExportClick: () => void
@@ -24,11 +26,13 @@ interface TopHeaderProps {
   onTMClick: () => void
   onShortcutsClick: () => void
   onGameUpdateClick: () => void
+  onBackToWelcome: () => void
 }
 
 /**
  * TopHeader component
  * @param activeFileName - Tên file đang được chọn trong Sidebar
+ * @param gameFolderPath - Đường dẫn thư mục game thực tế
  * @param sourceLanguage - Ngôn ngữ nguồn
  * @param onSettingsClick - Mở Settings Modal
  * @param onExportClick - Mở Export Modal
@@ -38,9 +42,12 @@ interface TopHeaderProps {
  * @param onGlossaryClick - Mở Glossary Manager Modal
  * @param onTMClick - Mở TM Manager Modal
  * @param onShortcutsClick - Mở Keyboard Shortcuts Modal
+ * @param onGameUpdateClick - Mở Update Game Modal
+ * @param onBackToWelcome - Trở về Welcome Screen
  */
 export function TopHeader({
   activeFileName,
+  gameFolderPath,
   sourceLanguage,
   onSettingsClick,
   onExportClick,
@@ -51,6 +58,7 @@ export function TopHeader({
   onTMClick,
   onShortcutsClick,
   onGameUpdateClick,
+  onBackToWelcome,
 }: TopHeaderProps) {
   const { theme, setTheme } = useTheme()
 
@@ -70,12 +78,16 @@ export function TopHeader({
     theme === 'light'  ? 'Light mode'  :
                          'System theme'
 
+  const displayName = gameFolderPath
+    ? gameFolderPath.split(/[\\/]/).pop() || gameFolderPath
+    : 'Project'
+
   return (
     <header className="h-11 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-3">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
         <Folder className="size-3.5 flex-shrink-0" />
-        <span className="font-medium text-foreground flex-shrink-0">Project</span>
+        <span className="font-medium text-foreground flex-shrink-0">{displayName}</span>
         <ChevronRight className="size-3 flex-shrink-0" />
         <span className="flex-shrink-0">tl</span>
         <ChevronRight className="size-3 flex-shrink-0" />
@@ -87,11 +99,32 @@ export function TopHeader({
         )}>
           {activeFileName || 'Select a file'}
         </span>
+        {gameFolderPath && (
+          <>
+            <ChevronRight className="size-3 flex-shrink-0" />
+            <span className="text-muted-foreground truncate font-mono text-[10px]" title={gameFolderPath}>
+              {gameFolderPath}
+            </span>
+          </>
+        )}
       </nav>
 
       {/* Action Buttons */}
       <TooltipProvider delayDuration={0}>
         <div className="flex items-center gap-0.5 flex-shrink-0">
+
+          {/* Back to Welcome */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-back-to-welcome" variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1.5" onClick={onBackToWelcome}>
+                <ArrowLeft className="size-3.5" />
+                <span className="hidden xl:inline">Home</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Back to Home Screen</p></TooltipContent>
+          </Tooltip>
+
+          <div className="w-px h-5 bg-border mx-0.5" />
 
           {/* Pre-flight */}
           <Tooltip>

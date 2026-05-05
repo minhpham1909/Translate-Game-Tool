@@ -24,7 +24,7 @@
 | Phase 2: Translation Engine | ✅ HOÀN THÀNH | AI Service (5 providers), Queue, TM cache, Rate limit |
 | Phase 3: Utilities & Export | ✅ HOÀN THÀNH | QA Linter, Export Service, Project Setup |
 | Phase 4E: IPC Bridge + UI | ⚠️ MỘT PHẦN | IPC handlers đầy đủ, UI components đầy đủ, nhưng nhiều modal chưa nối API thật |
-| Phase 5: Hoàn thiện & Polish | 🔒 CHƯA BẮT ĐẦU | — |
+| Phase 5: Hoàn thiện & Polish | ✅ HOÀN THÀNH | Language Patch (floating switcher), Selective Export, Settings integration |
 
 ---
 
@@ -89,6 +89,14 @@
   - Auto backup file cũ trước khi ghi
   - Fallback: warning/empty blocks → giữ nguyên bản gốc
 - ✅ `restoreBackup()`: Khôi phục từ backup file
+- ✅ `generateLanguagePatch(key?, showIcon?)`: Tạo universal floating language switcher
+  - Non-invasive: Chỉ thêm file `00_vnt_lang_patch.rpy` vào `game/`
+  - Auto-detect ngôn ngữ bằng `renpy.known_languages()` + fallback scan `tl/` folder
+  - Floating popup với zorder 2147483647 (always on top)
+  - Configurable key binding (F8/F9/F10/F11/F12/Shift+L)
+  - Optional 🔤 icon toggle
+- ✅ `exportAllFiles()`: Export tất cả files + auto-generate language patch
+- ✅ `exportSelectedFiles(filePaths)`: Export selected files + auto-generate language patch
 
 ### 3.8 Project IPC (`src/main/api/projectIpc.ts`)
 - ✅ `scanAvailableLanguages()`: Quét `game/tl/` trả về danh sách ngôn ngữ
@@ -112,14 +120,14 @@
 - ✅ `searchBlocks()`: Tìm kiếm theo LIKE/GLOB, hỗ trợ matchCase, wholeWord, useRegex
 - ✅ `replaceBlockText()`: Thay thế text trong block
 
-### 3.13 IPC Handlers (`src/main/ipcHandler.ts`) — 23 channels
+### 3.13 IPC Handlers (`src/main/ipcHandler.ts`) — 29 channels
 - ✅ **Project (5):** `project:scanLanguages`, `project:setup`, `project:getCurrent`, `project:getRecent`, `project:selectFolder`
 - ✅ **Settings (4):** `settings:get`, `settings:save`, `settings:testConnection`, `settings:listModels`
 - ✅ **Glossary (4):** `glossary:getAll`, `glossary:add`, `glossary:update`, `glossary:delete`
 - ✅ **TM (4):** `tm:getAll`, `tm:delete`, `tm:clearUnused`, `tm:search`
 - ✅ **Search (2):** `search:searchBlocks`, `search:replaceBlockText`
 - ✅ **Workspace (3):** `workspace:getFiles`, `workspace:getBlocks`, `workspace:updateBlock`
-- ✅ **Engine (4):** `engine:preflight`, `engine:translateBatch`, `engine:startQueue`, `engine:stopQueue`
+- ✅ **Engine (7):** `engine:preflight`, `engine:translateBatch`, `engine:startQueue`, `engine:stopQueue`, `engine:exportAll`, `engine:exportSelected`, `engine:getFilesWithChanges`
 
 ### 3.14 IPC Broadcast (`src/main/utils/ipcBroadcast.ts`)
 - ✅ `emitSystemLog()`: Push log events tới renderer
@@ -129,9 +137,10 @@
 
 ## 4. PRELOAD (`src/preload/index.ts` + `index.d.ts`)
 - ✅ contextBridge expose `window.api` với đầy đủ types
-- ✅ 6 nhóm API: `project`, `settings`, `glossary`, `tm`, `search`, `workspace`, `engine`, `events`
+- ✅ 7 nhóm API: `project`, `settings`, `glossary`, `tm`, `search`, `workspace`, `engine`, `events`
 - ✅ Event listeners: `onSystemLog`, `onEngineProgress` (có cleanup function)
 - ✅ TypeScript declarations đồng bộ với implementation
+- ✅ Export APIs: `engine.exportAll`, `engine.exportSelected`, `engine.getFilesWithChanges`
 
 ---
 
@@ -154,11 +163,13 @@
 | Revert block | ✅ HOẠT ĐỘNG | Gọi `updateBlock` với text=null, status='empty' |
 | AI Translate (single block) | ✅ HOẠT ĐỘNG | Gọi `window.api.engine.translateBatch([blockId])` → refetch |
 | Preflight + Start Queue | ✅ HOẠT ĐỘNG | `window.api.engine.preflight` + `startQueue` |
-| Export project | ⚠️ CHƯA NỐI | Modal hiển thị nhưng `onRestore` là `console.log`, không gọi export API |
+| Export project (All) | ✅ HOẠT ĐỘNG | `engine.exportAll` → ghi files + auto-generate `00_vnt_lang_patch.rpy` |
+| Export project (Selective) | ✅ HOẠT ĐỘNG | `engine.getFilesWithChanges` + `engine.exportSelected` → checkbox UI |
 | Search & Replace | ⚠️ CHƯA NỐI | `onSearch`, `onReplace`, `onReplaceAll` là mock/stub |
 | QA Report | ⚠️ CHƯA NỐI | `issues=[]` hardcoded, `onGoToBlock` là `console.log` |
 | TM Manager | ⚠️ CHƯA NỐI | `entries=[]` hardcoded, callbacks là `console.log` |
 | Glossary Manager | ⚠️ CHƯA NỐI | `entries=[]` hardcoded, callbacks là `console.log` |
+| Language Patch Settings | ✅ HOẠT ĐỘNG | SettingsModal System tab: configurable key + icon toggle |
 
 ### 5.3 UI Components
 

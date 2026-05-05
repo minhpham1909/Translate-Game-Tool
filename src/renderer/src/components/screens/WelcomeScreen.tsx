@@ -6,6 +6,7 @@
  */
 import { type ReactElement } from 'react'
 import { FolderOpen, Plus, Clock, AlertTriangle, ChevronRight, BookOpen } from 'lucide-react'
+import { getLanguageLabel } from '../../../../shared/types'
 
 interface RecentProject {
   gameFolderPath: string
@@ -127,7 +128,7 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
                       </p>
                       <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-muted-foreground">
                         <span className="px-1.5 py-0.5 rounded border border-border bg-muted/40">
-                          {project.sourceLanguage} → {project.targetLanguage}
+                          {project.sourceLanguage} → {getLanguageLabel(project.targetLanguage)}
                         </span>
                         <span>{project.lastOpenedAt}</span>
                       </div>

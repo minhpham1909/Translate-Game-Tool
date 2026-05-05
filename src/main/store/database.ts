@@ -2,29 +2,99 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs-extra'
+import { getCustomDbFolder } from './settings'
 
 let db: Database.Database | null = null
+let activeDbPath: string | null = null
+
+/**
+ * Lấy tên folder game từ đường dẫn, dùng để đặt tên file DB.
+ * VD: D:\Games\ABC\game → ABC
+ */
+function getGameFolderName(gameFolderPath: string): string {
+  // Normalize path
+  const normalized = gameFolderPath.replace(/[/\\]+$/, '')
+  const base = path.basename(normalized)
+
+  // Nếu folder là "game", lấy folder cha (thường là tên game)
+  if (base.toLowerCase() === 'game') {
+    const parent = path.basename(path.dirname(normalized))
+    return sanitizeFolderName(parent) || 'default'
+  }
+
+  return sanitizeFolderName(base) || 'default'
+}
+
+/**
+ * Làm sạch tên folder để dùng làm tên file (loại ký tự đặc biệt).
+ */
+function sanitizeFolderName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9À-ỹà-ỹ\s_-]/g, '').trim().replace(/\s+/g, '_')
+}
+
+/**
+ * Tạo đường dẫn DB an toàn, xử lý xung đột tên.
+ * VD: customDir/vnt_ABC.sqlite, nếu tồn tại → vnt_ABC_2.sqlite
+ */
+function resolveDbPath(gameName: string): string {
+  const customFolder = getCustomDbFolder()
+
+  let dbDir: string
+  if (customFolder && fs.existsSync(customFolder)) {
+    dbDir = customFolder
+  } else {
+    // Fallback: userData/db
+    dbDir = path.join(app.getPath('userData'), 'db')
+  }
+
+  fs.ensureDirSync(dbDir)
+
+  const baseName = `vnt_${gameName}`
+  let candidate = path.join(dbDir, `${baseName}.sqlite`)
+
+  // Handle collision
+  let counter = 2
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(dbDir, `${baseName}_${counter}.sqlite`)
+    counter++
+  }
+
+  return candidate
+}
+
+/**
+ * Lấy đường dẫn file DB đang active (cho mục đích debug/hiển thị)
+ */
+export function getActiveDbPath(): string | null {
+  return activeDbPath
+}
 
 /**
  * Khởi tạo Database SQLite.
- * Được lưu trong thư mục userData của Electron để đảm bảo dữ liệu
- * không bị mất khi ứng dụng update.
+ * Nếu có gameFolderPath, file sẽ được đặt tên theo tên game: vnt_<GameName>.sqlite
+ * Nếu không, dùng file default: translation_project.sqlite
+ * Hỗ trợ custom folder qua Settings.
  */
-export function initDatabase(): Database.Database {
+export function initDatabase(gameFolderPath?: string): Database.Database {
   if (db) return db
 
-  // Lấy đường dẫn an toàn để lưu data: C:\Users\<User>\AppData\Roaming\<App_Name>
-  const userDataPath = app.getPath('userData')
-  const dbDir = path.join(userDataPath, 'db')
+  let dbPath: string
 
-  // Đảm bảo thư mục lưu trữ tồn tại
-  fs.ensureDirSync(dbDir)
+  if (gameFolderPath) {
+    const gameName = getGameFolderName(gameFolderPath)
+    dbPath = resolveDbPath(gameName)
+    console.log(`[System] Per-project DB: vnt_${gameName}.sqlite → ${dbPath}`)
+  } else {
+    // Fallback: dùng file default (backward compatibility)
+    const dbDir = path.join(app.getPath('userData'), 'db')
+    fs.ensureDirSync(dbDir)
+    dbPath = path.join(dbDir, 'translation_project.sqlite')
+    console.log(`[System] Default DB: ${dbPath}`)
+  }
 
-  const dbPath = path.join(dbDir, 'translation_project.sqlite')
-  console.log(`[System] userData: ${userDataPath}`)
-  console.log(`[System] dbPath: ${dbPath}`)
+  activeDbPath = dbPath
 
-  // Clean up stale WAL/SHM files if main DB is missing (prevents corruption on fresh start)
+  // Clean up stale WAL/SHM files if main DB is missing
   if (!fs.existsSync(dbPath)) {
     fs.removeSync(dbPath + '-wal')
     fs.removeSync(dbPath + '-shm')
@@ -41,8 +111,7 @@ export function initDatabase(): Database.Database {
   // Bật Foreign Keys
   db.pragma('foreign_keys = ON')
   // Tăng cache để giảm I/O
-  db.pragma('cache_size = -4000') // 4MB cache
-  // Bật integrity check on every write
+  db.pragma('cache_size = -4000')
   db.pragma('synchronous = NORMAL')
 
   // Check integrity on startup
@@ -50,7 +119,6 @@ export function initDatabase(): Database.Database {
     const integrity = db.pragma('integrity_check', { simple: true }) as string
     if (integrity !== 'ok') {
       console.warn('[Database] Integrity check failed:', integrity)
-      // Try to recover by vacuuming
       db.exec('VACUUM')
     }
   } catch (err) {

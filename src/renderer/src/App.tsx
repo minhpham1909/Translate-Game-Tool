@@ -72,11 +72,15 @@ function CATWorkspace({
   onChangeLocation,
   recentProjects,
   onOpenProject,
+  onBackToWelcome,
+  onRefreshApiKey,
 }: {
   onNewProject: () => void
   onChangeLocation: () => void
   recentProjects: RecentProject[]
   onOpenProject: (project: RecentProject) => void
+  onBackToWelcome: () => void
+  onRefreshApiKey: () => void
 }): ReactElement {
   const [files, setFiles] = useState<SidebarFile[]>([])
   const [activeFileId, setActiveFileId] = useState<number | null>(null)
@@ -86,9 +90,16 @@ function CATWorkspace({
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [preflightData, setPreflightData] = useState({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
   const [glossaryEntries, setGlossaryEntries] = useState<GlossaryModalEntry[]>([])
+  const [gameFolderPath, setGameFolderPath] = useState<string>('')
   const activeFileIdRef = useRef<number | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notify = useNotification()
+
+  useEffect(() => {
+    void window.api.project.getCurrent().then((config) => {
+      if (config?.gameFolderPath) setGameFolderPath(config.gameFolderPath)
+    })
+  }, [])
 
   const fetchFiles = async (): Promise<void> => {
     try {
@@ -372,6 +383,7 @@ function CATWorkspace({
     <div className="flex flex-col h-full w-full bg-background text-foreground overflow-hidden">
       <TopHeader
         activeFileName={activeFile?.file_name}
+        gameFolderPath={gameFolderPath}
         sourceLanguage="english"
         onSettingsClick={() => openModal('settings')}
         onExportClick={() => openModal('export')}
@@ -382,6 +394,7 @@ function CATWorkspace({
         onTMClick={() => openModal('tmManager')}
         onShortcutsClick={() => openModal('keyboardShortcuts')}
         onGameUpdateClick={() => openModal('updateGame')}
+        onBackToWelcome={onBackToWelcome}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -415,7 +428,10 @@ function CATWorkspace({
       />
 
       {/* All Modals */}
-      <SettingsModal open={modals.settings} onOpenChange={(o) => setModals((p) => ({ ...p, settings: o }))} />
+      <SettingsModal open={modals.settings} onOpenChange={(o) => {
+        setModals((p) => ({ ...p, settings: o }))
+        if (!o) onRefreshApiKey()
+      }} />
 
       <PreflightModal
         open={modals.preflight}
@@ -435,8 +451,6 @@ function CATWorkspace({
       <ExportModal
         open={modals.export}
         onOpenChange={(o) => setModals((p) => ({ ...p, export: o }))}
-        backups={[]}
-        onRestore={(path) => console.log('[TODO] Restore:', path)}
       />
 
       <QAReportModal
@@ -538,6 +552,7 @@ function AppContent(): ReactElement {
   const [hasProject, setHasProject] = useState(false)
   const [isWizardOpen, setIsWizardOpen] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
+  const [hasApiKey, setHasApiKey] = useState(false)
   const [workspaceKey, setWorkspaceKey] = useState(0)
 
   // Khởi động: luôn vào Welcome, chỉ load danh sách recent
@@ -548,6 +563,16 @@ function AppContent(): ReactElement {
         setRecentProjects(recent)
       } catch (err) {
         console.error('Failed to load recent projects:', err)
+      }
+      try {
+        const settings = await window.api.settings.get()
+        const providers = settings.providers
+        const keySet = (providers?.gemini?.apiKey || '') !== ''
+          || (providers?.claude?.apiKey || '') !== ''
+          || (providers?.openai_compatible?.apiKey || '') !== ''
+        setHasApiKey(keySet)
+      } catch (err) {
+        console.error('Failed to check API key:', err)
       }
     }
     loadRecent()
@@ -565,7 +590,8 @@ function AppContent(): ReactElement {
   const handleOpenProject = async (project: RecentProject): Promise<void> => {
     try {
       const { gameFolderPath, sourceLanguage, targetLanguage } = project
-      await window.api.project.setup({ gameFolderPath, sourceLanguage, targetLanguage })
+      // Mở lại project đã có — KHÔNG parse lại, chỉ load từ DB
+      await window.api.project.open({ gameFolderPath, sourceLanguage, targetLanguage })
       await refreshRecent()
       setHasProject(true)
       setWorkspaceKey((prev) => prev + 1)
@@ -585,10 +611,20 @@ function AppContent(): ReactElement {
           onChangeLocation={() => setIsWizardOpen(true)}
           recentProjects={recentProjects}
           onOpenProject={handleOpenProject}
+          onBackToWelcome={() => setHasProject(false)}
+          onRefreshApiKey={() => {
+            void window.api.settings.get().then((settings) => {
+              const providers = settings.providers
+              const keySet = (providers?.gemini?.apiKey || '') !== ''
+                || (providers?.claude?.apiKey || '') !== ''
+                || (providers?.openai_compatible?.apiKey || '') !== ''
+              setHasApiKey(keySet)
+            })
+          }}
         />
       ) : (
         <WelcomeScreen
-          hasApiKey={false}
+          hasApiKey={hasApiKey}
           recentProjects={recentProjects}
           onNewProject={() => setIsWizardOpen(true)}
           onOpenProject={handleOpenProject}

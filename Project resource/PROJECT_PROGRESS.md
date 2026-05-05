@@ -113,3 +113,22 @@
 ### Next Steps
 - Tiếp tục thực hiện Chunk 3: Frontend Data Binding & User Actions.
 
+## [2026-05-05] Session: Phase 5 - Language Patch & Selective Export
+### Completed
+- [x] Thêm `languagePatchKey` + `languagePatchIcon` vào `shared/types.ts` (AppSettings interface)
+- [x] Thêm default values trong `settings.ts` (`languagePatchKey: 'K_F8'`, `languagePatchIcon: true`)
+- [x] Tạo `generateLanguagePatch()` trong `exportService.ts` (universal floating popup, zorder 2147483647)
+- [x] Tích hợp patch generation vào `exportAllFiles()` và `exportSelectedFiles()` (auto-write `00_vnt_lang_patch.rpy` to `game/`)
+- [x] Cập nhật `SettingsModal.tsx`: Thêm state, load/save `languagePatchKey` và `languagePatchIcon`, UI section trong System tab
+- [x] Cập nhật `ExportModal.tsx`: Hiển thị file list với checkboxes, auto-select changed files, buttons (select changed/all/none)
+- [x] Fix `types.ts` encoding issues (rewrote entire file with proper UTF-8)
+- [x] Typecheck + Build: ✅ All pass
+
+### Current State
+- Phase 5 hoàn thành: Language Patch (floating language switcher) hoạt động, Selective Export UI sẵn sàng
+- Export sẽ tự động generate `00_vnt_lang_patch.rpy` vào thư mục `game/` của project
+
+### Next Steps
+- Test Export flow end-to-end: Export → Check `00_vnt_lang_patch.rpy` generated → Open game → Press F8 → Verify language switcher
+- Verify Language Patch works với different Ren'Py versions and game UI structures
+

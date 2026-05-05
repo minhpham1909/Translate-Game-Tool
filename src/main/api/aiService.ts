@@ -10,7 +10,7 @@
 
 import { GoogleGenerativeAI, Schema, SchemaType } from '@google/generative-ai'
 import { getSettings, getActiveProviderConfig } from '../store/settings'
-import { AppSettings } from '../../shared/types'
+import { AppSettings, getLanguageLabel } from '../../shared/types'
 import { OpenAICompatibleTranslator } from './translators/OpenAICompatibleTranslator'
 import { APIError } from './errors'
 
@@ -115,7 +115,7 @@ class GeminiTranslator {
 
     const model = this.genAI.getGenerativeModel({
       model: this.modelName,
-      systemInstruction: getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText, contextHistory),
+      systemInstruction: getSystemPrompt(getLanguageLabel(settings.targetLanguage), settings.userCustomPrompt, glossaryText, contextHistory),
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
@@ -124,7 +124,7 @@ class GeminiTranslator {
       }
     })
 
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`
+    const prompt = `Dịch mảng JSON sau sang ${getLanguageLabel(settings.targetLanguage)}:\n${JSON.stringify(texts)}`
 
     const result = await model.generateContent(prompt)
     const responseText = result.response.text()
@@ -161,8 +161,8 @@ class ClaudeTranslator {
   }
 
   async translate(texts: string[], settings: AppSettings, glossaryText: string = "", contextHistory: ContextBlock[] = []): Promise<string[]> {
-    const systemPrompt = getSystemPrompt(settings.targetLanguage, settings.userCustomPrompt, glossaryText, contextHistory)
-    const prompt = `Dịch mảng JSON sau sang ${settings.targetLanguage}:\n${JSON.stringify(texts)}`
+    const systemPrompt = getSystemPrompt(getLanguageLabel(settings.targetLanguage), settings.userCustomPrompt, glossaryText, contextHistory)
+    const prompt = `Dịch mảng JSON sau sang ${getLanguageLabel(settings.targetLanguage)}:\n${JSON.stringify(texts)}`
 
     const response = await fetch(`${this.baseURL.replace(/\/+$/, '')}/messages`, {
       method: 'POST',
@@ -237,6 +237,71 @@ function getCachedModels(providerId: string, config: { apiKey?: string; baseURL?
 function setCachedModels(providerId: string, config: { apiKey?: string; baseURL?: string }, models: string[]): void {
   const key = getModelCacheKey(providerId, config)
   modelListCache.set(key, { models, expiresAt: Date.now() + MODEL_CACHE_TTL_MS })
+}
+
+// ============================================================================
+// MODEL FILTERING — Only show text-generation (LLM) models
+// ============================================================================
+
+const NON_TEXT_KEYWORDS = [
+  'video', 'image', 'audio', 'speech', 'music', 'whisper',
+  'dall-e', 'midjourney', 'flux', 'tts', 'stt', 'realtime',
+  'generate', 'edit', 'inpaint', 'outpaint', 'upscale',
+  'embedding', 'embed', 'moderation', 'mod',
+  'text-to-video', 'text-to-speech', 'text-to-image',
+  'video-to-video', 'image-to-video', 'image-to-image',
+  'voice', 'sound', 'musicgen', 'audiocraft',
+  'dubbing', 'translate-audio',
+]
+
+const LLM_KEYWORDS = [
+  'gpt', 'claude', 'llama', 'mistral', 'qwen', 'deepseek',
+  'gemma', 'gemini', 'phi', 'command', 'yi', 'mixtral',
+  'zephyr', 'dbrx', 'falcon', 'olmo', 'mamba', 'vicuna',
+  'wizardlm', 'codellama', 'nous', 'solar', 'nous-hermes',
+  'minicpm', 'intern', 'yi', 'chatglm', 'qwen', 'baichuan',
+  'openchat', 'starling', 'airoboros', 'openhermes',
+  'neural', 'grok', 'sonnet', 'opus', 'haiku',
+  'o1', 'o3', 'o4', 'gpt-4', 'gpt-3',
+  'claude-', 'llama-', 'mistral-', 'qwen-', 'deepseek-',
+]
+
+/**
+ * Check if a model ID is likely a text-generation (LLM) model.
+ * Returns false for video/audio/image/embedding models.
+ */
+function isTextGenerationModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase()
+
+  // Reject: known non-text patterns
+  if (NON_TEXT_KEYWORDS.some((kw) => lower.includes(kw))) return false
+
+  // Accept: known LLM patterns
+  if (LLM_KEYWORDS.some((kw) => lower.includes(kw))) return true
+
+  // Reject: common OpenRouter prefixes for non-text models
+  // e.g. "google/gemma-3-27b-it" is OK, but "stabilityai/stable-diffusion-3" is not
+  // If the model ID doesn't match any known LLM pattern and looks like a provider/model combo,
+  // check for additional non-text indicators
+  const parts = lower.split('/')
+  if (parts.length >= 2) {
+    const provider = parts[0]
+    const model = parts.slice(1).join('/')
+
+    // Image/video model providers
+    const imageVideoProviders = ['stabilityai', 'runwayml', 'luma', 'pika', 'kling', 'minimax', 'vidu']
+    if (imageVideoProviders.includes(provider)) return false
+
+    // Embedding providers (commonly listed on OpenRouter)
+    if (provider.includes('embed') || model.includes('embed')) return false
+  }
+
+  // Short model IDs that look like version numbers or hashes are likely not LLMs
+  if (/^v\d+\.\d+/.test(lower)) return false
+
+  // Default: accept if it looks like a reasonable model name
+  // (contains letters and possibly numbers/dashes/underscores, not too short)
+  return lower.length >= 3 && /[a-zA-Z]/.test(lower)
 }
 
 // ============================================================================
@@ -472,6 +537,7 @@ ${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
         const remoteModels = raw
           .map((m: { id?: string; name?: string }) => m.id || m.name || '')
           .filter((id: string) => id.length > 0)
+          .filter((id: string) => isTextGenerationModel(id))
         const finalModels = remoteModels.length > 0 ? remoteModels : fallback
         if (finalModels.length > 0) setCachedModels(activeProvider, { apiKey, baseURL: config?.baseURL }, finalModels)
         return finalModels

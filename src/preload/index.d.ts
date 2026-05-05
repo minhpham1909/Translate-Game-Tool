@@ -106,13 +106,39 @@ export interface DiffSummary {
   totalFiles: number
 }
 
+export interface BackupEntry {
+  fileId: number
+  fileName: string
+  backupPath: string
+  createdAt: string
+  fileSize: number
+}
+
+export interface ExportResult {
+  exportedFiles: number
+  totalFiles: number
+  skippedFiles: number
+  errors: string[]
+}
+
+export interface ExportFileEntry {
+  id: number
+  fileName: string
+  filePath: string
+  totalBlocks: number
+  translatedBlocks: number
+  status: 'pending' | 'in_progress' | 'completed'
+  hasChanges: boolean
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
     api: {
       project: {
         scanLanguages: (gamePath: string) => Promise<string[]>
-        setup: (config: ProjectConfig) => Promise<void>
+        setup: (config: ProjectConfig, forceReparse?: boolean) => Promise<void>
+        open: (config: ProjectConfig) => Promise<void>
         getCurrent: () => Promise<ProjectConfig | null>
         selectFolder: () => Promise<string | null>
         getRecent: () => Promise<RecentProject[]>
@@ -168,6 +194,14 @@ declare global {
         save: (settings: Partial<AppSettings>) => Promise<void>
         testConnection: () => Promise<{ ok: boolean; error?: string }>
         listModels: (provider?: string) => Promise<string[]>
+        selectDbFolder: () => Promise<string | null>
+      }
+      export: {
+        getFilesWithChanges: () => Promise<ExportFileEntry[]>
+        exportAll: (approvedOnly: boolean) => Promise<ExportResult>
+        exportSelected: (fileIds: number[], approvedOnly: boolean) => Promise<ExportResult>
+        listBackups: () => Promise<BackupEntry[]>
+        restoreBackup: (fileId: number, backupPath: string) => Promise<void>
       }
     }
   }

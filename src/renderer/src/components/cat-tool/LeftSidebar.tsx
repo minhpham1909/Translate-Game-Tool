@@ -13,6 +13,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Progress } from '@renderer/components/ui/progress'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
+import { getLanguageLabel } from '../../../../shared/types'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { cn } from '@renderer/lib/utils'
 import type { RecentProject } from '../../../../shared/types'
@@ -159,7 +160,7 @@ export function LeftSidebar({
               <SelectContent>
                 {recentProjects.map((project) => (
                   <SelectItem key={project.gameFolderPath} value={project.gameFolderPath}>
-                    {project.sourceLanguage} → {project.targetLanguage} · {project.gameFolderPath}
+                    {project.sourceLanguage} → {getLanguageLabel(project.targetLanguage)} · {project.gameFolderPath}
                   </SelectItem>
                 ))}
               </SelectContent>

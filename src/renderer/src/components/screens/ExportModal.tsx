@@ -3,8 +3,8 @@
  * Modal Export project: cấu hình tuỳ chọn, progress bar,
  * terminal log và danh sách backup có thể restore.
  */
-import { useState } from 'react'
-import { Download, RotateCcw, CheckCircle2, AlertCircle, Loader2, Archive } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Download, RotateCcw, CheckCircle2, AlertCircle, Loader2, Archive, FileText } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@renderer/components/ui/dialog'
@@ -12,63 +12,137 @@ import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { cn } from '@renderer/lib/utils'
+import type { BackupEntry, ExportFileEntry } from '../../../../shared/types'
 
 type ExportStatus = 'idle' | 'exporting' | 'success' | 'error'
-
-interface BackupEntry {
-  fileId: number
-  fileName: string
-  backupPath: string
-  createdAt: string
-}
 
 interface ExportModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  backups?: BackupEntry[]
-  onRestore: (backupPath: string) => void
 }
 
 /**
  * ExportModal component
- * @param backups - Danh sách file backup hiện có
- * @param onRestore - Callback khi user muốn restore backup
  */
-export function ExportModal({ open, onOpenChange, backups = [], onRestore }: ExportModalProps) {
-  const [createBackup, setCreateBackup] = useState(true)
+export function ExportModal({ open, onOpenChange }: ExportModalProps) {
   const [approvedOnly, setApprovedOnly] = useState(true)
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle')
   const [exportProgress, setExportProgress] = useState(0)
   const [exportLogs, setExportLogs] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<'export' | 'backups'>('export')
+  const [backups, setBackups] = useState<BackupEntry[]>([])
+  const [files, setFiles] = useState<ExportFileEntry[]>([])
+  const [selectedFileIds, setSelectedFileIds] = useState<number[]>([])
 
   const appendLog = (msg: string) => {
     setExportLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
   }
 
+  // Load files with changes when modal opens
+  useEffect(() => {
+    if (!open || activeTab !== 'export') return
+    let cancelled = false
+    void window.api.export.getFilesWithChanges().then((data) => {
+      if (!cancelled) {
+        setFiles(data)
+        // Auto-select files with changes
+        const changedIds = data.filter(f => f.hasChanges).map(f => f.id)
+        setSelectedFileIds(changedIds)
+      }
+    }).catch((err) => {
+      console.error('Failed to load files with changes:', err)
+    })
+    return () => { cancelled = true }
+  }, [open, activeTab])
+
+  // Load backups when modal opens
+  useEffect(() => {
+    if (!open || activeTab !== 'backups') return
+    let cancelled = false
+    void window.api.export.listBackups().then((data) => {
+      if (!cancelled) setBackups(data)
+    }).catch((err) => {
+      console.error('Failed to load backups:', err)
+    })
+    return () => { cancelled = true }
+  }, [open, activeTab])
+
+  const toggleFileSelection = useCallback((fileId: number) => {
+    setSelectedFileIds(prev =>
+      prev.includes(fileId) ? prev.filter(id => id !== fileId) : [...prev, fileId]
+    )
+  }, [])
+
+  const selectAll = useCallback(() => {
+    setSelectedFileIds(files.map(f => f.id))
+  }, [files])
+
+  const selectNone = useCallback(() => {
+    setSelectedFileIds([])
+  }, [])
+
+  const selectChangedOnly = useCallback(() => {
+    setSelectedFileIds(files.filter(f => f.hasChanges).map(f => f.id))
+  }, [files])
+
   const handleExport = async () => {
+    if (selectedFileIds.length === 0) {
+      appendLog('⚠ Không có file nào được chọn để export.')
+      return
+    }
+
     setExportStatus('exporting')
     setExportProgress(0)
     setExportLogs([])
-    appendLog('Bắt đầu quá trình export...')
+    setActiveTab('export')
+    appendLog(`Bắt đầu export ${selectedFileIds.length} file... [Approved only: ${approvedOnly}]`)
 
-    // TODO: Thay bằng window.api.export.exportProject() ở Phase 4E
-    const steps = [
-      { p: 15, msg: 'Đang tải dữ liệu từ database...' },
-      { p: 30, msg: 'Đang tạo backup cho script.rpy...' },
-      { p: 50, msg: 'Đang ghi bản dịch vào script.rpy...' },
-      { p: 70, msg: 'Đang xử lý chapter1.rpy...' },
-      { p: 85, msg: 'Đang xử lý chapter2.rpy...' },
-      { p: 100, msg: '✓ Export hoàn tất — 7 files đã được ghi.' },
-    ]
+    try {
+      const result = await window.api.export.exportSelected(selectedFileIds, approvedOnly)
 
-    for (const step of steps) {
-      await new Promise((res) => setTimeout(res, 500))
-      setExportProgress(step.p)
-      appendLog(step.msg)
+      if (result.errors.length > 0) {
+        for (const err of result.errors) {
+          appendLog(`✗ ${err}`)
+        }
+      }
+
+      // Calculate progress per file
+      for (let i = 0; i <= result.totalFiles; i++) {
+        setExportProgress(Math.round((i / result.totalFiles) * 100))
+        if (i < result.totalFiles) {
+          await new Promise((res) => setTimeout(res, 100))
+        }
+      }
+
+      appendLog(`✓ Export hoàn tất — ${result.exportedFiles}/${result.totalFiles} files đã được ghi.`)
+      if (result.skippedFiles > 0) {
+        appendLog(`⚠ ${result.skippedFiles} file(s) bị bỏ qua do lỗi.`)
+      }
+
+      setExportStatus('success')
+
+      // Refresh backups after export
+      const updatedBackups = await window.api.export.listBackups()
+      setBackups(updatedBackups)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      appendLog(`✗ Export thất bại: ${message}`)
+      setExportStatus('error')
     }
+  }
 
-    setExportStatus('success')
+  const handleRestore = async (backup: BackupEntry) => {
+    appendLog(`Đang khôi phục ${backup.fileName} từ backup...`)
+    try {
+      await window.api.export.restoreBackup(backup.fileId, backup.backupPath)
+      appendLog(`✓ Đã khôi phục ${backup.fileName} thành công.`)
+      // Refresh backups
+      const updatedBackups = await window.api.export.listBackups()
+      setBackups(updatedBackups)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      appendLog(`✗ Restore thất bại: ${message}`)
+    }
   }
 
   const handleClose = () => {
@@ -76,8 +150,14 @@ export function ExportModal({ open, onOpenChange, backups = [], onRestore }: Exp
     setExportStatus('idle')
     setExportProgress(0)
     setExportLogs([])
+    setBackups([])
+    setFiles([])
+    setSelectedFileIds([])
     onOpenChange(false)
   }
+
+  const changedCount = files.filter(f => f.hasChanges).length
+  const totalCount = files.length
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -112,25 +192,69 @@ export function ExportModal({ open, onOpenChange, backups = [], onRestore }: Exp
           {/* ======== EXPORT TAB ======== */}
           {activeTab === 'export' && (
             <>
+              {/* File Selection List */}
+              {exportStatus === 'idle' && files.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Files ({changedCount}/{totalCount} có thay đổi)
+                    </p>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={selectChangedOnly}>
+                        Chọn files có thay đổi
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={selectAll}>
+                        Chọn tất cả
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={selectNone}>
+                        Bỏ chọn
+                      </Button>
+                    </div>
+                  </div>
+
+                  <ScrollArea className="h-40 rounded-md border border-border bg-muted/10">
+                    <div className="p-2 space-y-0.5">
+                      {files.map((file) => (
+                        <label
+                          key={file.id}
+                          className={cn(
+                            'flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-colors text-xs',
+                            selectedFileIds.includes(file.id)
+                              ? 'bg-primary/10 text-foreground'
+                              : 'hover:bg-muted/50 text-muted-foreground'
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedFileIds.includes(file.id)}
+                            onChange={() => toggleFileSelection(file.id)}
+                            className="accent-primary flex-shrink-0"
+                          />
+                          <FileText className="size-3 flex-shrink-0" />
+                          <span className="truncate flex-1 font-mono">{file.fileName}</span>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {file.hasChanges && (
+                              <span className="px-1 py-0.5 rounded bg-primary/20 text-primary text-[9px] font-medium">
+                                {file.translatedBlocks}/{file.totalBlocks}
+                              </span>
+                            )}
+                            {!file.hasChanges && (
+                              <span className="text-[9px] text-muted-foreground italic">chưa dịch</span>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                  {selectedFileIds.length === 0 && (
+                    <p className="text-[10px] text-warning">⚠ Chưa chọn file nào để export.</p>
+                  )}
+                </div>
+              )}
+
               {/* Options */}
               {exportStatus === 'idle' && (
                 <div className="space-y-3">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tuỳ chọn</p>
-                  <label className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors">
-                    <input
-                      id="checkbox-create-backup"
-                      type="checkbox"
-                      checked={createBackup}
-                      onChange={(e) => setCreateBackup(e.target.checked)}
-                      className="mt-0.5 accent-primary"
-                    />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Tạo file backup</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Lưu bản gốc dưới dạng <code className="font-mono bg-background px-1 rounded">.backup_[timestamp]</code>
-                      </p>
-                    </div>
-                  </label>
                   <label className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors">
                     <input
                       id="checkbox-approved-only"
@@ -142,7 +266,7 @@ export function ExportModal({ open, onOpenChange, backups = [], onRestore }: Exp
                     <div>
                       <p className="text-sm font-medium text-foreground">Chỉ export Approved</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Block Draft/Empty/Warning sẽ fallback về bản gốc tiếng Anh.
+                        Block Draft/Empty/Warning sẽ fallback về bản gốc.
                       </p>
                     </div>
                   </label>
@@ -225,7 +349,7 @@ export function ExportModal({ open, onOpenChange, backups = [], onRestore }: Exp
                           variant="outline"
                           size="sm"
                           className="flex-shrink-0 ml-3 h-7 text-xs gap-1.5"
-                          onClick={() => onRestore(backup.backupPath)}
+                          onClick={() => handleRestore(backup)}
                         >
                           <RotateCcw className="size-3" />
                           Restore
@@ -244,9 +368,13 @@ export function ExportModal({ open, onOpenChange, backups = [], onRestore }: Exp
             {exportStatus === 'success' ? 'Close' : 'Cancel'}
           </Button>
           {activeTab === 'export' && exportStatus === 'idle' && (
-            <Button id="btn-start-export" onClick={handleExport}>
+            <Button
+              id="btn-start-export"
+              onClick={handleExport}
+              disabled={selectedFileIds.length === 0}
+            >
               <Download className="size-3.5 mr-1.5" />
-              Start Export
+              Export {selectedFileIds.length} file{selectedFileIds.length !== 1 ? 's' : ''}
             </Button>
           )}
         </DialogFooter>
