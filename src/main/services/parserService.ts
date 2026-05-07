@@ -46,10 +46,19 @@ function resetWorkspaceTables(): void {
 /**
  * Bắt đầu quá trình parse toàn bộ project
  * @param gameFolderPath Đường dẫn tuyệt đối đến game/
- * @param sourceLanguage Ngôn ngữ nguồn (vd: english)
+ * @param sourceLanguage Ngôn ngữ nguồn (vd: english, hoặc 'None' cho file gốc)
  */
 export async function parseProject(gameFolderPath: string, sourceLanguage: string): Promise<void> {
-  const targetDir = path.join(gameFolderPath, 'tl', sourceLanguage)
+  // Không cho phép parse với target = None (nếu gọi nhầm)
+  if (sourceLanguage === 'None') {
+    console.warn('[ParserService] Source = None, sẽ quét từ game/ thay vì tl/None/')
+  }
+
+  // Xử lý case source = None: quét file từ game/ thay vì tl/None/
+  const isNoneSource = sourceLanguage === 'None'
+  const targetDir = isNoneSource
+    ? gameFolderPath
+    : path.join(gameFolderPath, 'tl', sourceLanguage)
 
   const exists = await fs.pathExists(targetDir)
   if (!exists) {
@@ -108,7 +117,11 @@ export async function parseProjectDiff(
   newGameFolderPath: string,
   sourceLanguage: string
 ): Promise<DiffSummary> {
-  const targetDir = path.join(newGameFolderPath, 'tl', sourceLanguage)
+  // Xử lý case source = None: quét từ game/ thay vì tl/None/
+  const isNoneSource = sourceLanguage === 'None'
+  const targetDir = isNoneSource
+    ? newGameFolderPath
+    : path.join(newGameFolderPath, 'tl', sourceLanguage)
 
   const exists = await fs.pathExists(targetDir)
   if (!exists) {
@@ -196,7 +209,11 @@ export async function previewDiff(
   removedFileCount: number
   totalNewRpyFiles: number
 }> {
-  const targetDir = path.join(newGameFolderPath, 'tl', sourceLanguage)
+  // Xử lý case source = None: quét từ game/ thay vì tl/None/
+  const isNoneSource = sourceLanguage === 'None'
+  const targetDir = isNoneSource
+    ? newGameFolderPath
+    : path.join(newGameFolderPath, 'tl', sourceLanguage)
 
   const exists = await fs.pathExists(targetDir)
   if (!exists) {

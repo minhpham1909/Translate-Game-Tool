@@ -199,7 +199,8 @@ const api: RendererApi = {
     open: (config: ProjectConfig) => ipcRenderer.invoke('project:open', config) as Promise<void>,
     getCurrent: () => ipcRenderer.invoke('project:getCurrent') as Promise<ProjectConfig | null>,
     selectFolder: () => ipcRenderer.invoke('project:selectFolder') as Promise<string | null>,
-    getRecent: () => ipcRenderer.invoke('project:getRecent') as Promise<RecentProject[]>,
+       getRecent: () => ipcRenderer.invoke('project:getRecent') as Promise<RecentProject[]>,
+       delete: (gameFolderPath: string, deleteFiles?: boolean) => ipcRenderer.invoke('project:delete', gameFolderPath, deleteFiles) as Promise<void>,
     scanCompiled: (gameDir: string) => ipcRenderer.invoke('project:scanCompiled', gameDir) as Promise<CompiledScanResult>,
     unpackGame: (gameDir: string, mode?: 'extract' | 'decompile' | 'auto') =>
       ipcRenderer.invoke('project:unpackGame', gameDir, mode) as Promise<UnpackResult>,
@@ -283,8 +284,8 @@ const api: RendererApi = {
     exportAll: (approvedOnly: boolean) => ipcRenderer.invoke('export:exportAll', approvedOnly) as Promise<ExportResult>,
     exportSelected: (fileIds: number[], approvedOnly: boolean) => ipcRenderer.invoke('export:exportSelected', fileIds, approvedOnly) as Promise<ExportResult>,
     listBackups: () => ipcRenderer.invoke('export:listBackups') as Promise<BackupEntry[]>,
-    restoreBackup: (fileId: number, backupPath: string) => ipcRenderer.invoke('export:restoreBackup', fileId, backupPath) as Promise<void>
-  }
+     restoreBackup: (fileId: number, backupPath: string) => ipcRenderer.invoke('export:restoreBackup', fileId, backupPath) as Promise<void>
+   }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

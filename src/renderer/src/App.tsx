@@ -602,6 +602,19 @@ function AppContent(): ReactElement {
     }
   }
 
+  const handleDeleteProject = async (gameFolderPath: string, deleteFiles: boolean = false): Promise<void> => {
+    try {
+      await window.api.project.delete(gameFolderPath, deleteFiles)
+      await refreshRecent()
+      const msg = deleteFiles ? 'Project và file dịch đã được xóa.' : 'Project đã được xóa khỏi danh sách recent.'
+      notify.success('Đã xóa project', msg)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('Failed to delete project:', message)
+      notify.error('Failed to delete project', message)
+    }
+  }
+
   return (
     <TooltipProvider>
       {hasProject ? (
@@ -628,6 +641,7 @@ function AppContent(): ReactElement {
           recentProjects={recentProjects}
           onNewProject={() => setIsWizardOpen(true)}
           onOpenProject={handleOpenProject}
+          onDeleteProject={handleDeleteProject}
         />
       )}
       <SetupWizardModal

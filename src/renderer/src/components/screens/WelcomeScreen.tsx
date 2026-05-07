@@ -5,13 +5,15 @@
  * và cảnh báo nếu chưa có API key.
  */
 import { type ReactElement } from 'react'
-import { FolderOpen, Plus, Clock, AlertTriangle, ChevronRight, BookOpen } from 'lucide-react'
+import { FolderOpen, Plus, Clock, AlertTriangle, ChevronRight, BookOpen, Trash2 } from 'lucide-react'
 import { getLanguageLabel } from '../../../../shared/types'
+import { useNotification } from '../../context/NotificationContext'
 
 interface RecentProject {
   gameFolderPath: string
   sourceLanguage: string
   targetLanguage: string
+  onDeleteProject?: (gameFolderPath: string) => void
   lastOpenedAt: string
 }
 
@@ -20,6 +22,7 @@ interface WelcomeScreenProps {
   hasApiKey: boolean
   onNewProject: () => void
   onOpenProject: (project: RecentProject) => void
+  onDeleteProject?: (gameFolderPath: string) => void
 }
 
 /**
@@ -29,7 +32,9 @@ interface WelcomeScreenProps {
  * @param onNewProject - Callback mở Setup Wizard
  * @param onOpenProject - Callback load lại project cũ
  */
-export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, onOpenProject }: WelcomeScreenProps): ReactElement {
+export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, onOpenProject, onDeleteProject }: WelcomeScreenProps): ReactElement {
+  const notify = useNotification()
+
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
 
@@ -107,38 +112,62 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
             </span>
           </div>
 
-          {recentProjects.length === 0 ? (
-            <div className="flex items-center justify-center h-24 rounded-lg border border-dashed border-border">
-              <p className="text-xs text-muted-foreground italic">Chưa có project nào gần đây</p>
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-auto pr-1">
-              {recentProjects.map((project, index) => (
-                <button
-                  key={index}
-                  id={`recent-project-${index}`}
-                  onClick={() => onOpenProject(project)}
-                  className="w-full flex items-start justify-between gap-3 px-3 py-3 rounded-md border border-border bg-card hover:border-primary/40 hover:bg-accent transition-all group text-left"
-                >
-                  <div className="flex items-start gap-3 min-w-0">
-                    <FolderOpen className="size-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-foreground font-mono whitespace-normal break-all">
-                        {project.gameFolderPath}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-muted-foreground">
-                        <span className="px-1.5 py-0.5 rounded border border-border bg-muted/40">
-                          {project.sourceLanguage} → {getLanguageLabel(project.targetLanguage)}
-                        </span>
-                        <span>{project.lastOpenedAt}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronRight className="size-3.5 text-muted-foreground flex-shrink-0 group-hover:text-foreground transition-colors" />
-                </button>
-              ))}
-            </div>
-          )}
+           {recentProjects.length === 0 ? (
+             <div className="flex items-center justify-center h-24 rounded-lg border border-dashed border-border">
+               <p className="text-xs text-muted-foreground italic">Chưa có project nào gần đây</p>
+             </div>
+           ) : (
+             <div className="space-y-2 max-h-64 overflow-auto pr-1">
+               {recentProjects.map((project, index) => (
+                 <div
+                   key={index}
+                   className="relative flex items-start gap-3 px-3 py-3 rounded-md border border-border bg-card hover:border-primary/40 hover:bg-accent transition-all group"
+                 >
+                   <button
+                     onClick={() => onOpenProject(project)}
+                     className="flex-1 flex items-start gap-3 min-w-0 text-left"
+                   >
+                     <FolderOpen className="size-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                     <div className="min-w-0">
+                       <p className="text-xs font-medium text-foreground font-mono whitespace-normal break-all">
+                         {project.gameFolderPath}
+                       </p>
+                       <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                         <span className="px-1.5 py-0.5 rounded border border-border bg-muted/40">
+                           {project.sourceLanguage} → {getLanguageLabel(project.targetLanguage)}
+                         </span>
+                         <span>{project.lastOpenedAt}</span>
+                       </div>
+                     </div>
+                   </button>
+                   <button
+                     onClick={async (e) => {
+                       e.stopPropagation()
+                       const confirmed = await notify.confirm({
+                         title: 'Xóa Project',
+                         message: 'Xóa project này khỏi danh sách recent?',
+                         confirmText: 'Xóa',
+                         cancelText: 'Hủy'
+                       })
+                       if (confirmed) {
+                         const deleteFiles = await notify.confirm({
+                           title: 'Xóa file dịch?',
+                           message: 'Xóa cả file dịch trong thư mục game?\n(Chọn Hủy nếu chỉ muốn xóa khỏi danh sách)',
+                           confirmText: 'Xóa luôn file',
+                           cancelText: 'Chỉ xóa project'
+                         })
+                         onDeleteProject?.(project.gameFolderPath, deleteFiles)
+                       }
+                     }}
+                     className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
+                     title="Xóa project"
+                   >
+                     <Trash2 className="size-3.5" />
+                   </button>
+                 </div>
+               ))}
+             </div>
+           )}
         </div>
       </div>
 

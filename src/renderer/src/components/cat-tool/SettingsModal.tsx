@@ -102,10 +102,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   // Database Storage
   const [customDbFolder, setCustomDbFolder] = useState('')
 
-  // Language Patch
-  const [languagePatchKey, setLanguagePatchKey] = useState('K_F8')
-  const [languagePatchIcon, setLanguagePatchIcon] = useState(true)
-
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -141,8 +137,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setMaxLengthRatio([settings.maxLengthRatio ?? 1.3])
       setContextWindowSize([settings.contextWindowSize ?? 5])
       setCustomDbFolder(settings.customDbFolder || '')
-      setLanguagePatchKey(settings.languagePatchKey || 'K_F8')
-      setLanguagePatchIcon(settings.languagePatchIcon !== false)
 
       // Normalize target language to code (backward compat with display names)
       const rawLang = settings.targetLanguage || 'vietnamese'
@@ -218,8 +212,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       maxLengthRatio: maxLengthRatio[0],
       contextWindowSize: contextWindowSize[0],
       customDbFolder,
-      languagePatchKey,
-      languagePatchIcon,
       theme,
     })
     onOpenChange(false)
@@ -766,56 +758,11 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                 </>
               )}
 
-              {/* ======================== TAB: SYSTEM ======================== */}
-              {activeTab === 'system' && (
-                <>
-                  <div className="space-y-3">
-                    <Label>Language Patch Settings</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Cấu hình phương thức chuyển đổi ngôn ngữ trong game sau khi export.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Shortcut Key</Label>
-                        <Select
-                          value={languagePatchKey || 'K_F8'}
-                          onValueChange={(value) => {
-                            setLanguagePatchKey(value)
-                          }}
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="K_F8">F8</SelectItem>
-                            <SelectItem value="K_F9">F9</SelectItem>
-                            <SelectItem value="K_F10">F10</SelectItem>
-                            <SelectItem value="K_F11">F11</SelectItem>
-                            <SelectItem value="K_F12">F12</SelectItem>
-                            <SelectItem value="K_l">Shift + L</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-[10px] text-muted-foreground">
-                          Phím tắt trong game để mở Language Switcher
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Show 🔤 Icon</Label>
-                        <div className="flex items-center gap-2 pt-1">
-                          <Switch
-                            checked={languagePatchIcon !== false}
-                            onCheckedChange={(checked) => setLanguagePatchIcon(checked)}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            Hiển thị icon ở góc phải trên để chọn ngôn ngữ
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <Label>Interface Theme</Label>
+               {/* ======================== TAB: SYSTEM ======================== */}
+               {activeTab === 'system' && (
+                 <>
+                   <div className="space-y-3">
+                     <Label>Interface Theme</Label>
                     <div className="grid grid-cols-3 gap-2">
                       {[
                         { value: 'dark' as const,   label: 'Dark',   icon: <Moon className="size-4" /> },

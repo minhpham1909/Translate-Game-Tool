@@ -1,5 +1,5 @@
 import { dialog, ipcMain } from 'electron'
-import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProjects, openProject } from './api/projectIpc'
+import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProjects, openProject, deleteProject } from './api/projectIpc'
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGlossaryEnabled } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
@@ -33,6 +33,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('project:getRecent', () => {
     return getRecentProjects()
+  })
+
+  ipcMain.handle('project:delete', (_, gameFolderPath: string, deleteFiles: boolean = false) => {
+    deleteProject(gameFolderPath, deleteFiles)
   })
 
   ipcMain.handle('project:selectFolder', async () => {
@@ -78,7 +82,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('settings:save', (_, partial: Partial<AppSettings>) => {
-    return saveSettings(partial)
+    saveSettings(partial)
   })
 
   ipcMain.handle('settings:testConnection', async () => {

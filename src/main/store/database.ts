@@ -11,7 +11,7 @@ let activeDbPath: string | null = null
  * Lấy tên folder game từ đường dẫn, dùng để đặt tên file DB.
  * VD: D:\Games\ABC\game → ABC
  */
-function getGameFolderName(gameFolderPath: string): string {
+export function getGameFolderName(gameFolderPath: string): string {
   // Normalize path
   const normalized = gameFolderPath.replace(/[/\\]+$/, '')
   const base = path.basename(normalized)
@@ -36,7 +36,7 @@ function sanitizeFolderName(name: string): string {
  * Tạo đường dẫn DB an toàn, xử lý xung đột tên.
  * VD: customDir/vnt_ABC.sqlite, nếu tồn tại → vnt_ABC_2.sqlite
  */
-function resolveDbPath(gameName: string): string {
+export function resolveDbPath(gameName: string): string {
   const customFolder = getCustomDbFolder()
 
   let dbDir: string
@@ -67,6 +67,41 @@ function resolveDbPath(gameName: string): string {
  */
 export function getActiveDbPath(): string | null {
   return activeDbPath
+}
+
+/**
+ * Tìm đường dẫn file DB thực tế cho gameName (không tạo mới).
+ * Quét các file vnt_{gameName}.sqlite, vnt_{gameName}_2.sqlite, ...
+ */
+export function findExistingDbPath(gameName: string): string | null {
+  const customFolder = getCustomDbFolder()
+  
+  let dbDir: string
+  if (customFolder && fs.existsSync(customFolder)) {
+    dbDir = customFolder
+  } else {
+    dbDir = path.join(app.getPath('userData'), 'db')
+  }
+  
+  // Thử các pattern có thể có
+  const baseName = `vnt_${gameName}`
+  const candidates = [
+    path.join(dbDir, `${baseName}.sqlite`),
+    path.join(dbDir, `translation_project.sqlite`),  // fallback default
+  ]
+  
+  // Thử thêm _2, _3, ... (collision handling)
+  for (let i = 2; i <= 10; i++) {
+    candidates.push(path.join(dbDir, `${baseName}_${i}.sqlite`))
+  }
+  
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+  }
+  
+  return null
 }
 
 /**
