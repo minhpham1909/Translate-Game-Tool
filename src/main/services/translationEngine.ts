@@ -8,6 +8,7 @@ import { RateLimitError, TokenLimitError, ParsingError, APIError, normalizeError
 import { filterBlacklist } from '../utils/regexBlacklist'
 import { filterSmartGlossary, formatGlossaryForPrompt } from '../utils/smartGlossary'
 import { shouldRetry, categorizeErrors } from '../utils/selfCorrection'
+import { isAlreadyTranslated } from '../utils/langDetector'
 
 type Db = ReturnType<typeof getDatabase>
 
@@ -143,30 +144,74 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
 
   if (selectedBlocks.length === 0) return
 
-  emitSystemLog('info', `[AI] Translating ${selectedBlocks.length} selected block(s)...`)
+  // CRITICAL: Skip blocks that are already approved (no need to translate again)
+  let blocksToTranslate = selectedBlocks.filter(block => block.status !== 'approved')
+  const skippedCount = selectedBlocks.length - blocksToTranslate.length
+  if (skippedCount > 0) {
+    emitSystemLog('info', `[AI] Skipped ${skippedCount} already-approved block(s)`)
+  }
+
+  // Dirty Source Hotfix: if user re-imported a folder that already has target-language text
+  // but blocks are still marked as 'empty', auto-approve them and skip sending to AI.
+  const stmtMarkDirtyApproved = db.prepare(
+    `UPDATE translation_blocks SET translated_text = original_text, translated_by = 'dirty_source', status = 'approved' WHERE id = ?`
+  )
+  const dirtyApprovedIds = new Set<number>()
+  db.transaction(() => {
+    for (const block of blocksToTranslate) {
+      const blockId = block.id as number | undefined
+      if (!blockId) continue
+      if (block.status !== 'empty') continue
+      if (!isAlreadyTranslated(block.original_text, settings.targetLanguage)) continue
+
+      stmtMarkDirtyApproved.run(blockId)
+      dirtyApprovedIds.add(blockId)
+
+      const fileId = (block.file_id ?? 0) as number
+      if (fileId) fileIdsTouched.add(fileId)
+    }
+  })()
+
+  if (dirtyApprovedIds.size > 0) {
+    emitSystemLog('info', `[DirtySource] Auto-approved ${dirtyApprovedIds.size} already-translated block(s)`)
+    blocksToTranslate = blocksToTranslate.filter((b) => !dirtyApprovedIds.has((b.id ?? 0) as number))
+  }
+
+  if (blocksToTranslate.length === 0) {
+    if (dirtyApprovedIds.size > 0) {
+      db.transaction(() => {
+        for (const fileId of fileIdsTouched) updateFileStats(db, fileId)
+      })()
+    }
+
+    emitSystemLog('info', '[AI] No blocks need translation')
+    return
+  }
+
+  emitSystemLog('info', `[AI] Translating ${blocksToTranslate.length} selected block(s)...`)
 
   // Regex Blacklist: auto-skip non-translatable strings
   const enableBlacklist = settings.enableRegexBlacklist !== false
   const blacklistPatterns = settings.regexBlacklist || []
-  let skippedCount = 0
+  let blacklistSkipped = 0
 
   if (enableBlacklist && blacklistPatterns.length > 0) {
     const stmtMarkSkipped = db.prepare(
       `UPDATE translation_blocks SET translated_text = original_text, translated_by = 'blacklist', status = 'skipped' WHERE id = ?`
     )
-    for (const block of selectedBlocks) {
+    for (const block of blocksToTranslate) {
       const blockId = block.id as number | undefined
       if (!blockId) continue
       if (block.status !== 'empty') continue // Only skip empty blocks
       const reason = filterBlacklist([block.original_text], blacklistPatterns).skipped[0]
       if (reason) {
         stmtMarkSkipped.run(blockId)
-        skippedCount++
+        blacklistSkipped++
         emitSystemLog('info', `[Blacklist] Skipped: "${block.original_text.substring(0, 50)}" (${reason.reason})`)
       }
     }
-    if (skippedCount > 0) {
-      emitSystemLog('info', `[Blacklist] Skipped ${skippedCount} block(s) matching filter patterns.`)
+    if (blacklistSkipped > 0) {
+      emitSystemLog('info', `[Blacklist] Skipped ${blacklistSkipped} block(s) matching filter patterns.`)
     }
   }
 
@@ -189,7 +234,7 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
 
   // Phase 1: TM exact hit
   db.transaction(() => {
-    for (const block of selectedBlocks) {
+    for (const block of blocksToTranslate) {
       const fileId = (block.file_id ?? 0) as number
       if (fileId) fileIdsTouched.add(fileId)
 
@@ -222,12 +267,13 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
 
     // Context Windowing: fetch previous translated blocks as conversation context
     const contextWindowSize = settings.contextWindowSize || 0
-    const firstBlock = selectedBlocks.find((b) => b.status !== 'skipped' && blockMapping[0]?.id === b.id) || blockMapping[0]
+    const firstBlock = blockMapping[0]
     const fileId = firstBlock?.file_id ?? 0
-    const firstLineIndex = blockMapping[0]?.line_index ?? 0
+    const firstLineIndex = firstBlock?.line_index ?? 0
     const contextHistory = fileId > 0
       ? getContextBlocks(db, fileId, firstLineIndex, contextWindowSize)
       : []
+
     if (contextHistory.length > 0) {
       emitSystemLog('info', `[Context] Injecting ${contextHistory.length} block(s) of conversation history`)
     }
@@ -355,31 +401,21 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
         )
       : null
 
+    // Save final translations
     db.transaction(() => {
       for (let i = 0; i < translatedTexts.length; i++) {
-        const translated = finalTranslations[i]
         const block = blockMapping[i]
         const blockId = block?.id as number | undefined
         if (!blockId) continue
 
-        // Re-run linter on final translation
-        const errors = validateTranslation(block.original_text, translated)
-
-        // Length overflow check (warning only, not a self-correction trigger)
-        const enableLengthCheck = settings.enableLengthCheck !== false
-        const maxLengthRatio = settings.maxLengthRatio || 1.3
-        if (enableLengthCheck) {
-          const overflowWarnings = validateLengthOverflow(block.original_text, translated, maxLengthRatio)
-          if (overflowWarnings.length > 0) {
-            console.log(`[Overflow] Block ${blockId}: ${overflowWarnings[0]}`)
-          }
-          errors.push(...overflowWarnings)
-        }
-
+        const finalText = finalTranslations[i] ?? translatedTexts[i]
+        const errors = validateTranslation(block.original_text, finalText)
         const status = errors.length > 0 ? 'warning' : 'draft'
+        stmtUpdateBlock.run(finalText, providerName, status, blockId)
 
-        stmtUpdateBlock.run(translated, providerName, status, blockId)
-        if (enableTM && stmtInsertTM) stmtInsertTM.run(block.original_text, translated)
+        if (enableTM && stmtInsertTM && finalText !== block.original_text) {
+          stmtInsertTM.run(block.original_text, finalText)
+        }
       }
     })()
   }
@@ -483,18 +519,49 @@ export async function startBackgroundQueue(
 
     const textsToTranslate: string[] = []
     const blockMapping: { [index: number]: TranslationBlock } = {}
+    const fileIdsTouched = new Set<number>()
+
+    // Dirty Source Hotfix: auto-approve already-translated target-language blocks.
+    // This prevents Vietnamese→Vietnamese AI calls when user re-imports a previously overwritten folder.
+    const stmtMarkDirtyApproved = db.prepare(
+      `UPDATE translation_blocks SET translated_text = original_text, translated_by = 'dirty_source', status = 'approved' WHERE id = ?`
+    )
+
+    let dirtyApprovedCount = 0
+    let activeBlocks = pendingBlocks
+    if (activeBlocks.length > 0) {
+      const targetLang = settings.targetLanguage
+      db.transaction(() => {
+        for (const block of activeBlocks) {
+          const blockId = block.id as number | undefined
+          if (!blockId) continue
+          if (!isAlreadyTranslated(block.original_text, targetLang)) continue
+
+          stmtMarkDirtyApproved.run(blockId)
+          if (block.file_id) fileIdsTouched.add(block.file_id)
+          dirtyApprovedCount++
+          totalSuccess++
+        }
+      })()
+
+      if (dirtyApprovedCount > 0) {
+        activeBlocks = activeBlocks.filter((b) => !isAlreadyTranslated(b.original_text, targetLang))
+        emitSystemLog('info', `[DirtySource] Auto-approved ${dirtyApprovedCount} block(s) in this batch.`)
+      }
+    }
 
     // Regex Blacklist: auto-skip non-translatable strings
     const enableBlacklist = settings.enableRegexBlacklist !== false
     const blacklistPatterns = settings.regexBlacklist || []
     let batchSkippedCount = 0
-    let activeBlocks = pendingBlocks
+
+    // activeBlocks already excludes dirty-source approved blocks
 
     if (enableBlacklist && blacklistPatterns.length > 0) {
       const stmtMarkSkipped = db.prepare(
         `UPDATE translation_blocks SET translated_text = original_text, translated_by = 'blacklist', status = 'skipped' WHERE id = ?`
       )
-      activeBlocks = pendingBlocks.filter((block) => {
+      activeBlocks = activeBlocks.filter((block) => {
         const reason = filterBlacklist([block.original_text], blacklistPatterns).skipped[0]
         if (reason) {
           const blockId = block.id as number | undefined
@@ -524,7 +591,6 @@ export async function startBackgroundQueue(
           `UPDATE translation_memory SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE original_text = ?`
         )
       : null
-    const fileIdsTouched = new Set<number>()
 
     // Giai đoạn 1: Lọc qua TM
     db.transaction(() => {

@@ -176,16 +176,10 @@ export interface AppSettings {
   // =========================================
   contextWindowSize: number; // Số block trước đó để làm ngữ cảnh (0 = tắt, default 5)
 
-  // =========================================
-  // Group 10: Database Storage
-  // =========================================
-  customDbFolder: string; // Đường dẫn tùy chọn để lưu file SQLite. Empty = dùng userData default.
-
-  // =========================================
-  // Group 11: Language Patch
-  // =========================================
-  languagePatchKey?: string;   // Shortcut key (e.g., 'K_F8', 'K_F9', 'K_L')
-  languagePatchIcon?: boolean;  // Show 🔤 icon in game corner
+   // =========================================
+   // Group 10: Database Storage
+   // =========================================
+   customDbFolder: string; // Đường dẫn tùy chọn để lưu file SQLite. Empty = dùng userData default.
 }
 
 /**

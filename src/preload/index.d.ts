@@ -141,7 +141,8 @@ declare global {
         open: (config: ProjectConfig) => Promise<void>
         getCurrent: () => Promise<ProjectConfig | null>
         selectFolder: () => Promise<string | null>
-        getRecent: () => Promise<RecentProject[]>
+        getRecent: () => Promise<RecentProject[]>,
+        delete: (gameFolderPath: string, deleteFiles?: boolean) => Promise<void>
         scanCompiled: (gameDir: string) => Promise<CompiledScanResult>
         unpackGame: (gameDir: string, mode?: 'extract' | 'decompile' | 'auto') => Promise<UnpackResult>
         installUnpackerDeps: () => Promise<{ success: boolean; message: string }>

@@ -81,10 +81,6 @@ const defaultSettings: AppSettings = {
 
   // Group 10
   customDbFolder: '',
-
-  // Group 11: Language Patch
-  languagePatchKey: 'K_F8',
-  languagePatchIcon: true,
 }
 
 /**

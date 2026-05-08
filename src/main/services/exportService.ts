@@ -1,7 +1,7 @@
 import fs from 'fs-extra'
 import path from 'path'
 import { getDatabase } from '../store/database'
-import { getProjectConfig, getSettings } from '../store/settings'
+import { getProjectConfig } from '../store/settings'
 import { FileRecord, TranslationBlock } from '../../shared/types'
 
 export interface BackupEntry {
@@ -39,8 +39,8 @@ export function getFilesWithChanges(): ExportFileEntry[] {
   if (!project) throw new Error('Project config is not set.')
 
   const files = db.prepare(`
-    SELECT f.*, 
-      (SELECT COUNT(*) FROM translation_blocks 
+    SELECT f.*,
+      (SELECT COUNT(*) FROM translation_blocks
        WHERE file_id = f.id AND status != 'empty') as changed_blocks
     FROM files f
     ORDER BY f.file_name ASC
@@ -68,6 +68,11 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
 
   if (!project) throw new Error('Project config is not set.')
 
+  // Không cho phép export nếu target = None
+  if (project.targetLanguage === 'None') {
+    throw new Error('Không thể export với target = None. None là ngôn ngữ gốc, không phải đích dịch.')
+  }
+
   // 1. Lấy thông tin File và Blocks
   const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
   if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
@@ -81,13 +86,19 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
   }
 
   // 2. Xác định đường dẫn file Source và Target
-  const sourcePath = path.join(project.gameFolderPath, 'tl', project.sourceLanguage, fileRecord.file_path)
-  const targetPath = path.join(project.gameFolderPath, 'tl', project.targetLanguage, fileRecord.file_path)
+  // Xử lý case source = None: đọc từ game/ thay vì tl/None/
+  // DIRECT OVERWRITE STRATEGY: Target = Source (ghi đè chính nó)
+  const sourceBase = project.sourceLanguage === 'None'
+    ? project.gameFolderPath
+    : path.join(project.gameFolderPath, 'tl', project.sourceLanguage)
+  const sourcePath = path.join(sourceBase, fileRecord.file_path)
+  const targetPath = sourcePath // CRITICAL: Direct Overwrite - target equals source
 
   const exists = await fs.pathExists(sourcePath)
   if (!exists) throw new Error(`Source file not found: ${sourcePath}`)
 
-  // 3. Sao lưu nếu file Target đã tồn tại
+  // 3. CRITICAL: Sao lưu file gốc trước khi ghi đè (Direct Overwrite)
+  // Target path = Source path (ghi đè chính nó)
   if (await fs.pathExists(targetPath)) {
     const timestamp = new Date().getTime()
     const backupPath = `${targetPath}.backup_${timestamp}`
@@ -95,21 +106,24 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
     console.log(`[Export] Backup created: ${backupPath}`)
   }
 
-  // 4. Đọc file Source và thực hiện Cross-Translation Transform
+    // 4. Đọc file Source và thực hiện "Trojan Horse" Overwrite
+  // QUAN TRỌNG: GIỮ NGUYÊN header (vd: translate english:), CHỈ thay text bên trong
   const sourceContent = await fs.readFile(sourcePath, 'utf8')
   // Xử lý cả CRLF và LF
   const sourceLines = sourceContent.split(/\r?\n/)
   const targetLines: string[] = []
 
+  // Regex bắt header: capture indentation + "translate" + language + rest of line
   const headerRegex = /^(\s*translate\s+)([^\s]+)(\s+.+:.*)$/
 
   for (let i = 0; i < sourceLines.length; i++) {
     const line = sourceLines[i]
 
-    // A. Thay đổi Header Ngôn Ngữ
+    // A. GIỮ NGUYÊN Header (KHÔNG thay đổi source/target language)
     const headerMatch = line.match(headerRegex)
-    if (headerMatch && headerMatch[2] === project.sourceLanguage) {
-      targetLines.push(`${headerMatch[1]}${project.targetLanguage}${headerMatch[3]}`)
+    if (headerMatch) {
+      // Giữ nguyên header gốc (không thay thế ngôn ngữ)
+      targetLines.push(line)
       continue
     }
 
@@ -138,7 +152,16 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
       }
 
       if (block.block_type === 'string') {
-        targetLines.push(`${block.indentation}new "${finalTargetText}"`)
+        // Cấu trúc: old "..." / new "..."
+        // GIỮ NGUYÊN dòng "old", CHỈ thay "new" bằng bản dịch
+        if (finalTargetText !== block.original_text) {
+          // Thêm comment dòng gốc
+          targetLines.push(`${block.indentation}# old "${block.original_text}"`)
+          targetLines.push(`${block.indentation}new "${finalTargetText}"`)
+        } else {
+          // Fallback: giữ nguyên
+          targetLines.push(line)
+        }
         continue
       }
     }
@@ -148,10 +171,17 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
   }
 
   // 5. Ghi file Target (Đảm bảo luôn chèn CRLF để file chuẩn trên Windows)
-  await fs.ensureDir(path.dirname(targetPath))
+  // DIRECT OVERWRITE: targetPath = sourcePath, không cần ensureDir
   await fs.writeFile(targetPath, targetLines.join('\r\n'), 'utf8')
 
-  // 6. Cập nhật trạng thái
+  // 6. Xóa file .rpyc cũ để Ren'Py buộc recompile (Hullfix RPYC Deletion)
+  const rpycPath = targetPath + 'c' // script.rpy -> script.rpyc
+  if (await fs.pathExists(rpycPath)) {
+    await fs.remove(rpycPath)
+    console.log(`[Export] Deleted old compiled file to force recompilation: ${rpycPath}`)
+  }
+
+  // 7. Cập nhật trạng thái
   db.prepare(`UPDATE files SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fileId)
   console.log(`[Export] Exported: ${targetPath}`)
 }
@@ -190,24 +220,6 @@ export async function exportAllFiles(
     }
   }
 
-  // Generate language patch file after export
-  try {
-    const settings = getSettings()
-    const patchKey = settings.languagePatchKey || 'K_F8'
-    const showIcon = settings.languagePatchIcon !== false
-    const patchContent = generateLanguagePatch(patchKey, showIcon)
-    const project = getProjectConfig()
-    if (project) {
-      const patchPath = path.join(project.gameFolderPath, '00_vnt_lang_patch.rpy')
-      await fs.writeFile(patchPath, patchContent, 'utf8')
-      console.log(`[Export] Language patch generated: ${patchPath}`)
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('[Export] Failed to generate language patch:', message)
-    result.errors.push(`Language patch: ${message}`)
-  }
-
   return result
 }
 
@@ -244,24 +256,6 @@ export async function exportSelectedFiles(
       result.skippedFiles++
       console.error(`[Export] Failed to export ${fileRecord.file_name}:`, message)
     }
-  }
-
-  // Generate language patch file after export
-  try {
-    const settings = getSettings()
-    const patchKey = settings.languagePatchKey || 'K_F8'
-    const showIcon = settings.languagePatchIcon !== false
-    const patchContent = generateLanguagePatch(patchKey, showIcon)
-    const project = getProjectConfig()
-    if (project) {
-      const patchPath = path.join(project.gameFolderPath, '00_vnt_lang_patch.rpy')
-      await fs.writeFile(patchPath, patchContent, 'utf8')
-      console.log(`[Export] Language patch generated: ${patchPath}`)
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('[Export] Failed to generate language patch:', message)
-    result.errors.push(`Language patch: ${message}`)
   }
 
   return result
@@ -343,102 +337,5 @@ export async function restoreFileBackup(fileId: number, backupFilePath: string):
  */
 export async function restoreBackup(fileId: number, backupFilePath: string): Promise<void> {
   return restoreFileBackup(fileId, backupFilePath)
-}
-
-/**
- * Generate nội dung file 00_vnt_lang_patch.rpy để inject universal language switcher.
- * Không sửa code game, chỉ thêm file mới vào game/
- * @param key - Shortcut key (default: 'K_F8')
- * @param showIcon - Có hiển thị icon ở góc phải không
- */
-export function generateLanguagePatch(key?: string, showIcon?: boolean): string {
-  const shortcutKey = key || 'K_F8'
-  const showIconBool = showIcon !== false // default true
-
-  return `# 00_vnt_lang_patch.rpy - Auto-generated by VN Translator
-# Universal Language Switcher - no UI modification needed
-# Shortcut: ${shortcutKey} | Icon: ${showIconBool ? 'Enabled' : 'Disabled'}
-
-init python:
-    # Safely get all detected languages from the engine
-    def vnt_get_available_languages():
-        try:
-            langs = list(renpy.known_languages())
-        except:
-            # Fallback for Ren'Py < 6.99.10: scan tl/ folder manually
-            import os
-            tl_path = os.path.join(config.gamedir, 'tl')
-            langs = []
-            if os.path.exists(tl_path):
-                for item in os.listdir(tl_path):
-                    full = os.path.join(tl_path, item)
-                    if os.path.isdir(full) and item.lower() not in ['none', 'common']:
-                        langs.append(item)
-        langs.sort()
-        return langs
-
-# The Standalone Popup Screen
-screen vnt_language_popup():
-    modal True
-    zorder 2147483647  # Max int to stay on top
-
-    # Key binding handler (works with config.keymap)
-    on "vnt_lang_menu" action [Language(None), Hide("vnt_language_popup")]
-
-    frame:
-        align (0.5, 0.5)
-        padding (40, 40)
-        background Solid("#1a1a1ae6")  # Semi-transparent dark background
-
-        vbox:
-            spacing 15
-            text "VN Translator - Select Language" size 24 bold True color "#ffffff" xalign 0.5
-            null height 10
-
-            # Button for Root/Original Language
-            textbutton "Original Game Language":
-                action [Language(None), Hide("vnt_language_popup")]
-                text_color "#cccccc" hover_text_color "#4ade80"
-                xalign 0.5
-
-            # Buttons for dynamically detected translations
-            for lang in vnt_get_available_languages():
-                textbutton "[lang.capitalize()]":
-                    action [Language(lang), Hide("vnt_language_popup")]
-                    text_color "#cccccc" hover_text_color "#4ade80"
-                    xalign 0.5
-
-            null height 20
-            textbutton "Close":
-                action Hide("vnt_language_popup")
-                text_color "#ef4444" hover_text_color "#f87171"
-                xalign 0.5
-
-# Bind the popup to a hotkey (configurable)
-# Using config.overlay_screens for maximum compatibility
-init python:
-    config.keymap['vnt_lang_menu'] = ['${shortcutKey}']
-    # Register overlay screen - compatible with all Ren'Py versions
-    if "vnt_language_popup" not in config.overlay_screens:
-        config.overlay_screens.append("vnt_language_popup")
-
-${showIconBool ? `
-# Add a tiny button to the top right corner (fallback for mouse-only users)
-screen vnt_mouse_fallback():
-    zorder 9998
-    textbutton "VN":
-        text_size 12
-        action Show("vnt_language_popup")
-        align (1.0, 0.0)
-        padding (8, 4)
-        background Solid("#00000088")
-        text_color "#ffffff"
-
-# Ensure the mouse fallback is always shown
-init python:
-    if "vnt_mouse_fallback" not in config.overlay_screens:
-        config.overlay_screens.append("vnt_mouse_fallback")
-` : ''}
-`
 }
 

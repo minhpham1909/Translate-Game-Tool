@@ -1,9 +1,9 @@
 import path from 'path'
 import fs from 'fs-extra'
-import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProjects, saveProjectConfig } from '../store/settings'
+import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProjects, saveProjectConfig, saveRecentProjects } from '../store/settings'
 import { ProjectConfig, RecentProject, normalizeLanguageCode } from '../../shared/types'
-import { parseProject } from '../services/parserService'
-import { initDatabase, getDatabase } from '../store/database'
+import { getAllFiles, parseProject } from '../services/parserService'
+import { initDatabase, getDatabase, getGameFolderName, findExistingDbPath, closeDatabase } from '../store/database'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -55,6 +55,12 @@ export async function setupProject(config: ProjectConfig, forceReparse: boolean 
     throw new Error('Missing Project Config fields.')
   }
 
+  // Kiểm tra game folder có tồn tại không
+  const gameFolderExists = await fs.pathExists(config.gameFolderPath)
+  if (!gameFolderExists) {
+    throw new Error(`Thư mục game không tồn tại: ${config.gameFolderPath}`)
+  }
+
   // Normalize target language to ASCII-safe code
   const normalizedConfig = {
     ...config,
@@ -63,6 +69,27 @@ export async function setupProject(config: ProjectConfig, forceReparse: boolean 
 
   if (normalizedConfig.sourceLanguage === normalizedConfig.targetLanguage) {
     throw new Error('Target language phải khác ngôn ngữ nguồn.')
+  }
+
+  // Không cho phép target = None (None là ngôn ngữ gốc, không phải đích dịch)
+  if (normalizedConfig.targetLanguage === 'None') {
+    throw new Error('Không thể chọn None làm ngôn ngữ đích. None là ngôn ngữ gốc của game.')
+  }
+
+  // Kiểm tra source language folder (xử lý riêng case None)
+  if (normalizedConfig.sourceLanguage !== 'None') {
+    const sourceDir = path.join(config.gameFolderPath, 'tl', normalizedConfig.sourceLanguage)
+    const sourceExists = await fs.pathExists(sourceDir)
+    if (!sourceExists) {
+      throw new Error(`Thư mục ngôn ngữ nguồn không tồn tại: ${sourceDir}`)
+    }
+  } else {
+    // Source = None: kiểm tra game/ có file .rpy không
+    const gameFiles = await getAllFiles(config.gameFolderPath, '.rpy')
+    const hasRpyInGame = gameFiles.some(f => !f.includes(path.sep + 'tl' + path.sep))
+    if (!hasRpyInGame) {
+      throw new Error('Không tìm thấy file .rpy trong thư mục game/. Vui lòng kiểm tra cấu trúc game hoặc unpack game trước.')
+    }
   }
 
   // Khởi tạo DB
@@ -77,7 +104,7 @@ export async function setupProject(config: ProjectConfig, forceReparse: boolean 
   }
 
   // Parse toàn bộ .rpy files → nạp vào DB
-  await parseProject(normalizedConfig.gameFolderPath, normalizedConfig.sourceLanguage)
+  await parseProject(normalizedConfig.gameFolderPath, normalizedConfig.sourceLanguage, normalizedConfig.targetLanguage)
 
   // Lưu cấu hình
   saveProjectConfig(normalizedConfig)
@@ -100,6 +127,11 @@ export async function openProject(config: ProjectConfig): Promise<void> {
     targetLanguage: normalizeLanguageCode(config.targetLanguage),
   }
 
+  // Không cho phép target = None
+  if (normalizedConfig.targetLanguage === 'None') {
+    throw new Error('Không thể chọn None làm ngôn ngữ đích. None là ngôn ngữ gốc của game.')
+  }
+
   // Chỉ khởi tạo DB connection, KHÔNG gọi parseProject
   initDatabase(normalizedConfig.gameFolderPath)
 
@@ -120,5 +152,59 @@ export function getCurrentProject(): ProjectConfig | null {
  */
 export function getRecentProjects(): RecentProject[] {
   return readRecentProjects()
+}
+
+/**
+ * Xóa project khỏi danh sách recent VÀ xóa database.
+ * @param gameFolderPath Đường dẫn game cần xóa
+ * @param deleteFiles Có xóa cả file dịch trong tl/{target}/ không
+ */
+export async function deleteProject(gameFolderPath: string, deleteFiles: boolean = false): Promise<void> {
+  // 1. Xóa khỏi recent list
+  const current = readRecentProjects()
+  const filtered = current.filter(p => p.gameFolderPath !== gameFolderPath)
+  saveRecentProjects(filtered)
+
+  // 2. Đóng database và release memory
+  closeDatabase()
+
+  // 3. Wait for OS to release file locks (CRITICAL FIX FOR EBUSY)
+  await new Promise<void>((resolve) => setTimeout(() => resolve(), 200))
+
+  // 4. Xóa database file (tìm file thực tế, không tạo mới)
+  try {
+    const gameName = getGameFolderName(gameFolderPath)
+    const dbPath = findExistingDbPath(gameName)
+
+    if (dbPath && fs.existsSync(dbPath)) {
+      await fs.remove(dbPath)
+      // Xóa cả WAL/SHM files
+      try { await fs.remove(dbPath + '-wal') } catch {}
+      try { await fs.remove(dbPath + '-shm') } catch {}
+      console.log(`[ProjectSetup] Deleted database: ${dbPath}`)
+    } else {
+      console.log(`[ProjectSetup] No database found for ${gameName}`)
+    }
+  } catch (err) {
+    console.error('[ProjectSetup] Failed to delete database:', err)
+  }
+
+  // 5. Xóa file dịch nếu user yêu cầu
+  if (deleteFiles) {
+    try {
+      const project = filtered.find(p => p.gameFolderPath === gameFolderPath)
+      if (project) {
+        const targetPath = path.join(gameFolderPath, 'tl', project.targetLanguage)
+        if (fs.existsSync(targetPath)) {
+          await fs.remove(targetPath)
+          console.log(`[ProjectSetup] Deleted translation files: ${targetPath}`)
+        }
+      }
+    } catch (err) {
+      console.error('[ProjectSetup] Failed to delete translation files:', err)
+    }
+  }
+
+  console.log(`[ProjectSetup] Deleted project: ${gameFolderPath}`)
 }
 
