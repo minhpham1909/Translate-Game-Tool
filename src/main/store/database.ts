@@ -280,10 +280,17 @@ export function getDatabase(): Database.Database {
 
 /**
  * Đóng kết nối Database khi tắt app
+ * PHẢI dùng wal_checkpoint(TRUNCATE) để force WAL merge trước khi đóng
  */
 export function closeDatabase(): void {
   if (db) {
-    db.close()
-    db = null
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)') // Force WAL to merge before closing
+      db.close()
+      db = null // CRITICAL: Free the memory reference
+      console.log(`[System] Database closed: ${activeDbPath}`)
+    } catch (err) {
+      console.error('[System] Failed to close database:', err)
+    }
   }
 }

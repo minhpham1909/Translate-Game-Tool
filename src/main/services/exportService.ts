@@ -1,7 +1,7 @@
 import fs from 'fs-extra'
 import path from 'path'
 import { getDatabase } from '../store/database'
-import { getProjectConfig, getSettings } from '../store/settings'
+import { getProjectConfig } from '../store/settings'
 import { FileRecord, TranslationBlock } from '../../shared/types'
 
 export interface BackupEntry {
@@ -87,16 +87,18 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
 
   // 2. Xác định đường dẫn file Source và Target
   // Xử lý case source = None: đọc từ game/ thay vì tl/None/
+  // DIRECT OVERWRITE STRATEGY: Target = Source (ghi đè chính nó)
   const sourceBase = project.sourceLanguage === 'None'
     ? project.gameFolderPath
     : path.join(project.gameFolderPath, 'tl', project.sourceLanguage)
   const sourcePath = path.join(sourceBase, fileRecord.file_path)
-  const targetPath = path.join(project.gameFolderPath, 'tl', project.targetLanguage, fileRecord.file_path)
+  const targetPath = sourcePath // CRITICAL: Direct Overwrite - target equals source
 
   const exists = await fs.pathExists(sourcePath)
   if (!exists) throw new Error(`Source file not found: ${sourcePath}`)
 
-  // 3. Sao lưu nếu file Target đã tồn tại
+  // 3. CRITICAL: Sao lưu file gốc trước khi ghi đè (Direct Overwrite)
+  // Target path = Source path (ghi đè chính nó)
   if (await fs.pathExists(targetPath)) {
     const timestamp = new Date().getTime()
     const backupPath = `${targetPath}.backup_${timestamp}`
@@ -104,21 +106,24 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
     console.log(`[Export] Backup created: ${backupPath}`)
   }
 
-  // 4. Đọc file Source và thực hiện Cross-Translation Transform
+    // 4. Đọc file Source và thực hiện "Trojan Horse" Overwrite
+  // QUAN TRỌNG: GIỮ NGUYÊN header (vd: translate english:), CHỈ thay text bên trong
   const sourceContent = await fs.readFile(sourcePath, 'utf8')
   // Xử lý cả CRLF và LF
   const sourceLines = sourceContent.split(/\r?\n/)
   const targetLines: string[] = []
 
+  // Regex bắt header: capture indentation + "translate" + language + rest of line
   const headerRegex = /^(\s*translate\s+)([^\s]+)(\s+.+:.*)$/
 
   for (let i = 0; i < sourceLines.length; i++) {
     const line = sourceLines[i]
 
-    // A. Thay đổi Header Ngôn Ngữ
+    // A. GIỮ NGUYÊN Header (KHÔNG thay đổi source/target language)
     const headerMatch = line.match(headerRegex)
-    if (headerMatch && headerMatch[2] === project.sourceLanguage) {
-      targetLines.push(`${headerMatch[1]}${project.targetLanguage}${headerMatch[3]}`)
+    if (headerMatch) {
+      // Giữ nguyên header gốc (không thay thế ngôn ngữ)
+      targetLines.push(line)
       continue
     }
 
@@ -147,7 +152,16 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
       }
 
       if (block.block_type === 'string') {
-        targetLines.push(`${block.indentation}new "${finalTargetText}"`)
+        // Cấu trúc: old "..." / new "..."
+        // GIỮ NGUYÊN dòng "old", CHỈ thay "new" bằng bản dịch
+        if (finalTargetText !== block.original_text) {
+          // Thêm comment dòng gốc
+          targetLines.push(`${block.indentation}# old "${block.original_text}"`)
+          targetLines.push(`${block.indentation}new "${finalTargetText}"`)
+        } else {
+          // Fallback: giữ nguyên
+          targetLines.push(line)
+        }
         continue
       }
     }
@@ -157,10 +171,17 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
   }
 
   // 5. Ghi file Target (Đảm bảo luôn chèn CRLF để file chuẩn trên Windows)
-  await fs.ensureDir(path.dirname(targetPath))
+  // DIRECT OVERWRITE: targetPath = sourcePath, không cần ensureDir
   await fs.writeFile(targetPath, targetLines.join('\r\n'), 'utf8')
 
-  // 6. Cập nhật trạng thái
+  // 6. Xóa file .rpyc cũ để Ren'Py buộc recompile (Hullfix RPYC Deletion)
+  const rpycPath = targetPath + 'c' // script.rpy -> script.rpyc
+  if (await fs.pathExists(rpycPath)) {
+    await fs.remove(rpycPath)
+    console.log(`[Export] Deleted old compiled file to force recompilation: ${rpycPath}`)
+  }
+
+  // 7. Cập nhật trạng thái
   db.prepare(`UPDATE files SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fileId)
   console.log(`[Export] Exported: ${targetPath}`)
 }

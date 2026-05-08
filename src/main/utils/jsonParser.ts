@@ -43,8 +43,18 @@ export function extractJsonArray(responseText: string): string[] {
 
   // Step 3: Find the matching closing bracket
   // We need the LAST ']' that properly closes the array
-  const lastBracket = text.lastIndexOf(']')
+  let lastBracket = text.lastIndexOf(']')
+  
+  // FIX: If no closing bracket found, try to salvage truncated JSON
   if (lastBracket === -1 || lastBracket <= firstBracket) {
+    // Try to add closing bracket if the response was truncated
+    const trimmed = text.substring(firstBracket).trim()
+    if (trimmed.endsWith('"') || trimmed.endsWith(',') || trimmed.endsWith('\\"')) {
+      // Response was likely truncated - try to close the JSON array
+      const salvaged = text + '"]'
+      const salvagedResult = tryParseJson(salvaged.substring(firstBracket))
+      if (salvagedResult) return salvagedResult
+    }
     throw new JSONParsingError(
       'No closing "]" bracket found for JSON array',
       responseText
@@ -80,9 +90,37 @@ export function extractJsonArray(responseText: string): string[] {
   } catch (err) {
     if (err instanceof JSONParsingError) throw err
     const message = err instanceof Error ? err.message : String(err)
+    
+    // Try to salvage truncated JSON by adding closing bracket
+    const salvaged = candidate + '"]'
+    try {
+      const salvagedParsed = JSON.parse(salvaged)
+      if (Array.isArray(salvagedParsed) && salvagedParsed.every((item: unknown) => typeof item === 'string')) {
+        console.warn('[JSONParser] Salvaged truncated JSON by adding closing bracket')
+        return salvagedParsed as string[]
+      }
+    } catch {
+      // Ignore salvage attempt failure
+    }
+    
     throw new JSONParsingError(
       `JSON parse failed: ${message}`,
       responseText
     )
+  }
+}
+
+/**
+ * Try to parse JSON from a substring (helper for salvage attempts)
+ */
+function tryParseJson(text: string): string[] | null {
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed) && parsed.every((item: unknown) => typeof item === 'string')) {
+      return parsed as string[]
+    }
+    return null
+  } catch {
+    return null
   }
 }

@@ -2,8 +2,8 @@ import path from 'path'
 import fs from 'fs-extra'
 import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProjects, saveProjectConfig, saveRecentProjects } from '../store/settings'
 import { ProjectConfig, RecentProject, normalizeLanguageCode } from '../../shared/types'
-import { parseProject } from '../services/parserService'
-import { initDatabase, getDatabase, getGameFolderName, findExistingDbPath } from '../store/database'
+import { getAllFiles, parseProject } from '../services/parserService'
+import { initDatabase, getDatabase, getGameFolderName, findExistingDbPath, closeDatabase } from '../store/database'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -104,7 +104,7 @@ export async function setupProject(config: ProjectConfig, forceReparse: boolean 
   }
 
   // Parse toàn bộ .rpy files → nạp vào DB
-  await parseProject(normalizedConfig.gameFolderPath, normalizedConfig.sourceLanguage)
+  await parseProject(normalizedConfig.gameFolderPath, normalizedConfig.sourceLanguage, normalizedConfig.targetLanguage)
 
   // Lưu cấu hình
   saveProjectConfig(normalizedConfig)
@@ -159,21 +159,28 @@ export function getRecentProjects(): RecentProject[] {
  * @param gameFolderPath Đường dẫn game cần xóa
  * @param deleteFiles Có xóa cả file dịch trong tl/{target}/ không
  */
-export function deleteProject(gameFolderPath: string, deleteFiles: boolean = false): void {
+export async function deleteProject(gameFolderPath: string, deleteFiles: boolean = false): Promise<void> {
   // 1. Xóa khỏi recent list
   const current = readRecentProjects()
   const filtered = current.filter(p => p.gameFolderPath !== gameFolderPath)
   saveRecentProjects(filtered)
 
-  // 2. Xóa database file (tìm file thực tế, không tạo mới)
+  // 2. Đóng database và release memory
+  closeDatabase()
+
+  // 3. Wait for OS to release file locks (CRITICAL FIX FOR EBUSY)
+  await new Promise<void>((resolve) => setTimeout(() => resolve(), 200))
+
+  // 4. Xóa database file (tìm file thực tế, không tạo mới)
   try {
     const gameName = getGameFolderName(gameFolderPath)
     const dbPath = findExistingDbPath(gameName)
+
     if (dbPath && fs.existsSync(dbPath)) {
-      fs.removeSync(dbPath)
+      await fs.remove(dbPath)
       // Xóa cả WAL/SHM files
-      try { fs.removeSync(dbPath + '-wal') } catch {}
-      try { fs.removeSync(dbPath + '-shm') } catch {}
+      try { await fs.remove(dbPath + '-wal') } catch {}
+      try { await fs.remove(dbPath + '-shm') } catch {}
       console.log(`[ProjectSetup] Deleted database: ${dbPath}`)
     } else {
       console.log(`[ProjectSetup] No database found for ${gameName}`)
@@ -182,14 +189,14 @@ export function deleteProject(gameFolderPath: string, deleteFiles: boolean = fal
     console.error('[ProjectSetup] Failed to delete database:', err)
   }
 
-  // 3. Xóa file dịch nếu user yêu cầu
+  // 5. Xóa file dịch nếu user yêu cầu
   if (deleteFiles) {
     try {
       const project = filtered.find(p => p.gameFolderPath === gameFolderPath)
       if (project) {
         const targetPath = path.join(gameFolderPath, 'tl', project.targetLanguage)
         if (fs.existsSync(targetPath)) {
-          fs.removeSync(targetPath)
+          await fs.remove(targetPath)
           console.log(`[ProjectSetup] Deleted translation files: ${targetPath}`)
         }
       }

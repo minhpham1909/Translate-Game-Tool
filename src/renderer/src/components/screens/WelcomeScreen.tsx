@@ -5,7 +5,7 @@
  * và cảnh báo nếu chưa có API key.
  */
 import { type ReactElement } from 'react'
-import { FolderOpen, Plus, Clock, AlertTriangle, ChevronRight, BookOpen, Trash2 } from 'lucide-react'
+import { FolderOpen, Plus, Clock, AlertTriangle, BookOpen, Trash2 } from 'lucide-react'
 import { getLanguageLabel } from '../../../../shared/types'
 import { useNotification } from '../../context/NotificationContext'
 
@@ -22,7 +22,7 @@ interface WelcomeScreenProps {
   hasApiKey: boolean
   onNewProject: () => void
   onOpenProject: (project: RecentProject) => void
-  onDeleteProject?: (gameFolderPath: string) => void
+  onDeleteProject?: (gameFolderPath: string, deleteFiles?: boolean) => void
 }
 
 /**

@@ -35,8 +35,8 @@ export function registerIpcHandlers(): void {
     return getRecentProjects()
   })
 
-  ipcMain.handle('project:delete', (_, gameFolderPath: string, deleteFiles: boolean = false) => {
-    deleteProject(gameFolderPath, deleteFiles)
+  ipcMain.handle('project:delete', async (_, gameFolderPath: string, deleteFiles: boolean = false) => {
+    await deleteProject(gameFolderPath, deleteFiles)
   })
 
   ipcMain.handle('project:selectFolder', async () => {

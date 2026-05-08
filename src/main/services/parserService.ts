@@ -1,12 +1,47 @@
 import fs from 'fs-extra'
 import path from 'path'
-import { parseRpyFile, importRpyToDatabase, importRpyToDatabaseDiff, type DiffSummary } from '../parser/rpyParser'
+import { parseRpyFile, importRpyToDatabase, importRpyToDatabaseDiff, type DiffSummary, type ParseResult } from '../parser/rpyParser'
 import { getDatabase } from '../store/database'
+import { getProjectConfig, getSettings } from '../store/settings'
+import { isAlreadyTranslated } from '../utils/langDetector'
+
+function applyDirtySourceHotfix(blocks: ParseResult['blocks'], targetLanguage: string): number {
+  let approvedCount = 0
+
+  for (const block of blocks) {
+    if (block.status !== 'empty') continue
+
+    if (isAlreadyTranslated(block.original_text, targetLanguage)) {
+      block.status = 'approved'
+      block.translated_text = block.original_text
+      approvedCount++
+    }
+  }
+
+  return approvedCount
+}
+
+function recomputeFileRecordStats(parseResult: ParseResult): void {
+  const total = parseResult.blocks.length
+  const translated = parseResult.blocks.filter((b) => b.status !== 'empty').length
+
+  parseResult.fileRecord.total_blocks = total
+  parseResult.fileRecord.translated_blocks = translated
+
+  if (total === 0) {
+    parseResult.fileRecord.status = 'completed'
+    return
+  }
+
+  parseResult.fileRecord.status = translated === 0
+    ? 'pending'
+    : (translated >= total ? 'completed' : 'in_progress')
+}
 
 /**
  * Lấy tất cả các file có đuôi mở rộng chỉ định trong một thư mục (đệ quy)
  */
-async function getAllFiles(dir: string, ext: string): Promise<string[]> {
+export async function getAllFiles(dir: string, ext: string): Promise<string[]> {
   let results: string[] = []
   const targetExt = ext.toLowerCase()
 
@@ -48,7 +83,7 @@ function resetWorkspaceTables(): void {
  * @param gameFolderPath Đường dẫn tuyệt đối đến game/
  * @param sourceLanguage Ngôn ngữ nguồn (vd: english, hoặc 'None' cho file gốc)
  */
-export async function parseProject(gameFolderPath: string, sourceLanguage: string): Promise<void> {
+export async function parseProject(gameFolderPath: string, sourceLanguage: string, targetLanguage?: string): Promise<void> {
   // Không cho phép parse với target = None (nếu gọi nhầm)
   if (sourceLanguage === 'None') {
     console.warn('[ParserService] Source = None, sẽ quét từ game/ thay vì tl/None/')
@@ -77,6 +112,8 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
   console.log(`[ParserService] Target dir: ${targetDir}`)
   console.log(`[ParserService] Found ${rpyFiles.length} files. Parsing...`)
 
+  const effectiveTargetLanguage = targetLanguage || getSettings().targetLanguage
+
   // Parse và Import từng file
   let processedFiles = 0
   let totalBlocks = 0
@@ -86,6 +123,11 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
       const relativePath = path.relative(targetDir, filePath)
 
       const parseResult = await parseRpyFile(filePath, relativePath)
+
+      // Dirty Source Hotfix: auto-approve blocks already in target language.
+      // During initial setup, project config isn't persisted yet, so use AppSettings.targetLanguage.
+      const approvedCount = applyDirtySourceHotfix(parseResult.blocks, effectiveTargetLanguage)
+      if (approvedCount > 0) recomputeFileRecordStats(parseResult)
 
       // Import vào DB nếu file có dữ liệu (có blocks hoặc file rỗng thì tạo record rỗng)
       importRpyToDatabase(parseResult)
@@ -157,6 +199,13 @@ export async function parseProjectDiff(
     try {
       const relativePath = path.relative(targetDir, filePath)
       const parseResult = await parseRpyFile(filePath, relativePath)
+
+      // Dirty Source Hotfix: when new version contains already-translated (target-language) text,
+      // auto-approve it so it won't be sent to AI again.
+      // Prefer current project config if available; fallback to app settings.
+      const targetLanguage = getProjectConfig()?.targetLanguage || getSettings().targetLanguage
+      const approvedCount = applyDirtySourceHotfix(parseResult.blocks, targetLanguage)
+      if (approvedCount > 0) recomputeFileRecordStats(parseResult)
 
       // Find the old file ID by relative path
       const oldFileId = oldFileIdMap.get(relativePath) ?? null
