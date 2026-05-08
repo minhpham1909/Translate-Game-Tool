@@ -136,10 +136,30 @@ ${userSystemPrompt}`
     try {
       const parsed = JSON.parse(body) as { error?: { message?: string } }
       const message = parsed?.error?.message || ''
-      const match = message.match(/can only afford\s+(\d+)/i)
+
+      // Pattern 1: "can only afford X" (OpenAI/DeepSeek rate limiting)
+      let match = message.match(/can only afford\s+(\d+)/i)
       if (match && match[1]) {
         const value = Number(match[1])
-        return Number.isFinite(value) && value > 0 ? value : null
+        if (Number.isFinite(value) && value > 0) return value
+      }
+
+      // Pattern 2: OpenRouter "Prompt tokens limit exceeded: X > Y"
+      match = message.match(/(\d+)\s*>\s*(\d+)/)
+      if (match && match[2]) {
+        const limit = Number(match[2])
+        const requested = Number(match[1])
+        // limit = max allowed total tokens, requested = what we asked for
+        // Return a safe output token budget (40% of limit)
+        if (Number.isFinite(limit) && limit > 0 && Number.isFinite(requested)) {
+          const outputBudget = Math.max(64, Math.floor(limit * 0.4))
+          return outputBudget
+        }
+      }
+
+      // Pattern 3: "upgrade to a paid account" — credit issue, not salvageable
+      if (/upgrade to a paid account/i.test(message)) {
+        return -1 // sentinel: don't retry
       }
     } catch {
       // ignore JSON parse failures
@@ -285,7 +305,15 @@ ${userSystemPrompt}`
       const errorBody = await response.text().catch(() => '')
       if (response.status === 402) {
         const affordable = this.extractAffordableTokenLimit(errorBody)
-        if (affordable && affordable < requestedMaxTokens) {
+        if (affordable === -1) {
+          // OpenRouter credit/upgrade required — not retryable
+          throw new APIError(
+            'OpenRouter yêu cầu nâng cấp tài khoản hoặc thêm credits. Vui lòng giảm batch size (Settings → Prompt & Logic) hoặc nạp thêm credits tại https://openrouter.ai/settings/credits',
+            response.status,
+            errorBody
+          )
+        }
+        if (affordable && affordable > 0 && affordable < requestedMaxTokens) {
           const retryMaxTokens = Math.max(64, affordable)
           const retryResponse = await sendRequest(retryMaxTokens)
           if (!retryResponse.ok) {
@@ -301,17 +329,29 @@ ${userSystemPrompt}`
       }
     }
 
-    const data = await response.json().catch(() => null) as {
-      choices?: Array<{
-        message?: {
-          content?: string
-        }
-      }>
-    } | null
+    const rawBody = await response.text().catch(() => '')
+    if (!rawBody || rawBody.trim() === '') {
+      throw new APIError('Empty response body from AI service')
+    }
 
-    const content = data?.choices?.[0]?.message?.content
-    if (!content) {
-      throw new APIError('Empty response from AI service')
+    let content = ''
+    try {
+      const data = JSON.parse(rawBody)
+      // 1. Check if it matches standard OpenAI structure
+      if (data && typeof data === 'object' && Array.isArray(data.choices) && data.choices[0]?.message?.content !== undefined) {
+        content = data.choices[0].message.content
+      }
+      // 2. Fallback: valid JSON but NOT OpenAI format (raw array directly)
+      else {
+        content = rawBody
+      }
+    } catch {
+      // 3. Fallback: not valid JSON, let extractJsonArray handle it
+      content = rawBody
+    }
+
+    if (!content || content.trim() === '') {
+      throw new APIError('Could not extract content from AI response')
     }
 
     // Use robust JSON parser to handle dirty responses

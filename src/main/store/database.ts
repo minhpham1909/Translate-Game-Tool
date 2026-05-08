@@ -109,16 +109,38 @@ export function findExistingDbPath(gameName: string): string | null {
  * Nếu có gameFolderPath, file sẽ được đặt tên theo tên game: vnt_<GameName>.sqlite
  * Nếu không, dùng file default: translation_project.sqlite
  * Hỗ trợ custom folder qua Settings.
+ * QUAN TRỌNG: Tìm DB đã tồn tại trước, CHỈ tạo mới nếu chưa có.
  */
 export function initDatabase(gameFolderPath?: string): Database.Database {
-  if (db) return db
+  // Nếu đã init rồi, kiểm tra xem có cần chuyển sang per-project DB khác không
+  if (db) {
+    if (gameFolderPath) {
+      const gameName = getGameFolderName(gameFolderPath)
+      const expectedPath = findExistingDbPath(gameName) || resolveDbPath(gameName)
+      if (expectedPath !== activeDbPath) {
+        // Đang mở sai DB (ví dụ: default DB khi app startup) → đóng và mở per-project DB
+        closeDatabase()
+      } else {
+        return db
+      }
+    } else {
+      return db
+    }
+  }
 
   let dbPath: string
 
   if (gameFolderPath) {
     const gameName = getGameFolderName(gameFolderPath)
-    dbPath = resolveDbPath(gameName)
-    console.log(`[System] Per-project DB: vnt_${gameName}.sqlite → ${dbPath}`)
+    // Tìm DB đã tồn tại trước (khi reopen project)
+    const existing = findExistingDbPath(gameName)
+    if (existing) {
+      dbPath = existing
+      console.log(`[System] Found existing DB: ${dbPath}`)
+    } else {
+      dbPath = resolveDbPath(gameName)
+      console.log(`[System] Per-project DB: vnt_${gameName}.sqlite → ${dbPath}`)
+    }
   } else {
     // Fallback: dùng file default (backward compatibility)
     const dbDir = path.join(app.getPath('userData'), 'db')
@@ -287,10 +309,76 @@ export function closeDatabase(): void {
     try {
       db.pragma('wal_checkpoint(TRUNCATE)') // Force WAL to merge before closing
       db.close()
-      db = null // CRITICAL: Free the memory reference
-      console.log(`[System] Database closed: ${activeDbPath}`)
+      db = null
+      activeDbPath = null
+      console.log(`[System] Database closed`)
     } catch (err) {
       console.error('[System] Failed to close database:', err)
     }
+  }
+}
+
+/**
+ * Orphaned Tasks Recovery (Startup Cleanup)
+ * Reset các block bị kẹt ở status 'translating' hoặc 'in_progress' do app crash
+ * Gọi khi load project hoặc init database
+ */
+export function recoverOrphanedTasks(): void {
+  if (!db) return
+  try {
+    const result = db.prepare(`
+      UPDATE translation_blocks 
+      SET status = 'empty', translated_by = 'recovered'
+      WHERE status = 'translating' OR status = 'in_progress'
+    `).run()
+    if (result.changes > 0) {
+      console.log(`[System] Recovered ${result.changes} orphaned block(s) from crashed translation`)
+    }
+  } catch (err) {
+    console.error('[System] Failed to recover orphaned tasks:', err)
+  }
+}
+
+/**
+ * Vacuum Database (Preventing Bloat)
+ * Gọi sau khi xóa project để reclaim disk space
+ */
+export function vacuumDatabase(): void {
+  if (!db) return
+  try {
+    db.exec('VACUUM')
+    console.log('[System] Database vacuumed successfully')
+  } catch (err) {
+    console.error('[System] Failed to vacuum database:', err)
+  }
+}
+
+/**
+ * Sync files table progress counters from actual translation_blocks data.
+ * Đồng bộ total_blocks và translated_blocks để UI progress không bị 0%.
+ * Gọi sau mỗi lần parse hoặc load DB.
+ */
+export function syncAllFilesProgress(): void {
+  if (!db) return
+  try {
+    const syncQuery = `
+      UPDATE files
+      SET
+        total_blocks = (
+          SELECT COUNT(*)
+          FROM translation_blocks
+          WHERE translation_blocks.file_id = files.id
+        ),
+        translated_blocks = (
+          SELECT COUNT(*)
+          FROM translation_blocks
+          WHERE translation_blocks.file_id = files.id
+          AND status IN ('approved', 'draft', 'modified')
+        )
+    `
+    db.prepare(syncQuery).run()
+    console.log('[DB] Synced files progress counters')
+  } catch (err) {
+    console.error('[DB] Failed to sync files progress:', err)
   }
 }

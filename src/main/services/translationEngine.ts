@@ -162,7 +162,7 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
       const blockId = block.id as number | undefined
       if (!blockId) continue
       if (block.status !== 'empty') continue
-      if (!isAlreadyTranslated(block.original_text, settings.targetLanguage)) continue
+      if (!isAlreadyTranslated(block.original_text)) continue
 
       stmtMarkDirtyApproved.run(blockId)
       dirtyApprovedIds.add(blockId)
@@ -530,12 +530,11 @@ export async function startBackgroundQueue(
     let dirtyApprovedCount = 0
     let activeBlocks = pendingBlocks
     if (activeBlocks.length > 0) {
-      const targetLang = settings.targetLanguage
       db.transaction(() => {
         for (const block of activeBlocks) {
           const blockId = block.id as number | undefined
           if (!blockId) continue
-          if (!isAlreadyTranslated(block.original_text, targetLang)) continue
+          if (!isAlreadyTranslated(block.original_text)) continue
 
           stmtMarkDirtyApproved.run(blockId)
           if (block.file_id) fileIdsTouched.add(block.file_id)
@@ -545,7 +544,7 @@ export async function startBackgroundQueue(
       })()
 
       if (dirtyApprovedCount > 0) {
-        activeBlocks = activeBlocks.filter((b) => !isAlreadyTranslated(b.original_text, targetLang))
+        activeBlocks = activeBlocks.filter((b) => !isAlreadyTranslated(b.original_text))
         emitSystemLog('info', `[DirtySource] Auto-approved ${dirtyApprovedCount} block(s) in this batch.`)
       }
     }

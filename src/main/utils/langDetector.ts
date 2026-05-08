@@ -1,25 +1,50 @@
 /**
- * Lightweight heuristics for detecting already-translated (dirty source) strings.
- *
- * We intentionally use regex-based detection to avoid heavy dependencies.
+ * langDetector.ts
+ * Heuristic Language Detection - nhẹ, không dùng external library.
+ * Phát hiện text đã được dịch (Dirty Source) để tránh dịch lặp.
+ * KHÔNG phụ thuộc vào targetLanguage (Trojan Horse Paradox fix).
  */
-export function isAlreadyTranslated(text: string, targetLanguage: string): boolean {
+
+/**
+ * Phát hiện nếu text đã chứa ký tự đặc trưng của ngôn ngữ đã dịch.
+ * Dùng universal regex — không cần biết targetLanguage là gì.
+ * @param text - Văn bản cần kiểm tra
+ * @returns true nếu text có chứa ký tự đặc trưng của Vietnamese/Chinese
+ */
+export function isAlreadyTranslated(text: string): boolean {
   if (!text || text.trim() === '') return false
 
-  const lang = (targetLanguage || '').toLowerCase()
+  const normalized = text.normalize('NFC')
 
-  // Rule for Vietnamese: Check for specific diacritics
-  if (lang.includes('việt') || lang.includes('viet') || lang.includes('vietnamese') || lang.includes('vn')) {
-    // Regex matches any Vietnamese-specific character (both lower and upper case)
-    const vnRegex = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i
-    return vnRegex.test(text)
-  }
+  // Universal Vietnamese Regex (cả lower và upper case)
+  const vnRegex = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]/
+  if (vnRegex.test(normalized)) return true
 
-  // Future proofing for other languages (e.g., Japanese Kana/Kanji)
-  if (lang.includes('japanese') || lang.includes('nhật')) {
-    const jpRegex = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/
-    return jpRegex.test(text)
-  }
+  // Chinese (Hán tự thường gặp trong game Nhật có bản dịch Việt)
+  const cnRegex = /[\u4e00-\u9fff]/
+  if (cnRegex.test(normalized)) return true
 
   return false
+}
+
+/**
+ * Kiểm tra và xử lý block đã dịch (Dirty Source).
+ */
+export function handleDirtySource(originalText: string): {
+  isDirty: boolean
+  status: string
+  translatedText: string
+} {
+  if (isAlreadyTranslated(originalText)) {
+    return {
+      isDirty: true,
+      status: 'approved',
+      translatedText: originalText
+    }
+  }
+  return {
+    isDirty: false,
+    status: 'empty',
+    translatedText: ''
+  }
 }

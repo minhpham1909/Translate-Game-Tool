@@ -4,7 +4,7 @@
  * Tất cả modals được mở từ đây thông qua callback props.
  */
 import {
-  BarChart3, Search, Settings, Download, ChevronRight, Folder,
+  BarChart3, Search, Settings, Download, RotateCcw, ChevronRight, Folder,
   Sun, Moon, Monitor, ShieldAlert, Database, BookMarked, Keyboard, RefreshCw,
   ArrowLeft,
 } from 'lucide-react'
@@ -19,6 +19,7 @@ interface TopHeaderProps {
   sourceLanguage?: string
   onSettingsClick: () => void
   onExportClick: () => void
+  onRestoreClick: () => void
   onPreflightClick: () => void
   onSearchClick: () => void
   onQAClick: () => void
@@ -36,6 +37,7 @@ interface TopHeaderProps {
  * @param sourceLanguage - Ngôn ngữ nguồn
  * @param onSettingsClick - Mở Settings Modal
  * @param onExportClick - Mở Export Modal
+ * @param onRestoreClick - Mở Restore Backup Modal
  * @param onPreflightClick - Mở Pre-flight Modal
  * @param onSearchClick - Mở Search & Replace Modal
  * @param onQAClick - Mở QA Report Modal
@@ -51,6 +53,7 @@ export function TopHeader({
   sourceLanguage,
   onSettingsClick,
   onExportClick,
+  onRestoreClick,
   onPreflightClick,
   onSearchClick,
   onQAClick,
@@ -196,6 +199,16 @@ export function TopHeader({
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom"><p>Update Game Project — preserve translations after game update</p></TooltipContent>
+          </Tooltip>
+
+          {/* Restore Backup */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button id="btn-open-restore" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onRestoreClick}>
+                <RotateCcw className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p>Restore Backup — khôi phục file gốc từ bản backup</p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />

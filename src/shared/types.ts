@@ -35,6 +35,7 @@ export interface FileRecord {
 export interface BackupEntry {
   fileId: number;
   fileName: string;
+  filePath: string;
   backupPath: string;
   createdAt: string;
   fileSize: number;
@@ -184,27 +185,12 @@ export interface AppSettings {
 
 /**
  * Danh sách ngôn ngữ đích hỗ trợ.
+ * MVP: Chỉ hỗ trợ dịch sang tiếng Việt.
  * code: dùng cho folder path + translate header (ASCII-safe)
  * label: hiển thị UI (có dấu)
  */
 export const TARGET_LANGUAGES: { code: string; label: string }[] = [
   { code: 'vietnamese', label: 'Tiếng Việt' },
-  { code: 'english', label: 'English' },
-  { code: 'chinese_simplified', label: '简体中文' },
-  { code: 'chinese_traditional', label: '繁體中文' },
-  { code: 'japanese', label: '日本語' },
-  { code: 'korean', label: '한국어' },
-  { code: 'thai', label: 'ภาษาไทย' },
-  { code: 'spanish', label: 'Español' },
-  { code: 'french', label: 'Français' },
-  { code: 'german', label: 'Deutsch' },
-  { code: 'italian', label: 'Italiano' },
-  { code: 'portuguese', label: 'Português' },
-  { code: 'russian', label: 'Русский' },
-  { code: 'arabic', label: 'العربية' },
-  { code: 'hindi', label: 'हिन्दी' },
-  { code: 'indonesian', label: 'Bahasa Indonesia' },
-  { code: 'malay', label: 'Bahasa Melayu' },
 ]
 
 /**

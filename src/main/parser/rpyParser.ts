@@ -233,6 +233,20 @@ export function importRpyToDatabase(parseResult: ParseResult): void {
         block.line_index
       )
     }
+
+    // 4. Cập nhật translated_blocks từ dữ liệu thực tế (tránh out-of-sync)
+    const stats = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status != 'empty' THEN 1 ELSE 0 END) as translated
+      FROM translation_blocks WHERE file_id = ?
+    `).get(fileId) as { total: number; translated: number }
+
+    const newStatus = stats.translated === 0 ? 'pending' : stats.translated >= stats.total ? 'completed' : 'in_progress'
+    db.prepare(`
+      UPDATE files SET total_blocks = ?, translated_blocks = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(stats.total, stats.translated, newStatus, fileId)
   })
 
   // Thực thi Transaction

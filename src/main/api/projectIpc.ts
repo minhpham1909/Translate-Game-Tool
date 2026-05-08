@@ -3,7 +3,7 @@ import fs from 'fs-extra'
 import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProjects, saveProjectConfig, saveRecentProjects } from '../store/settings'
 import { ProjectConfig, RecentProject, normalizeLanguageCode } from '../../shared/types'
 import { getAllFiles, parseProject } from '../services/parserService'
-import { initDatabase, getDatabase, getGameFolderName, findExistingDbPath, closeDatabase } from '../store/database'
+import { initDatabase, getDatabase, getGameFolderName, findExistingDbPath, closeDatabase, recoverOrphanedTasks, vacuumDatabase, syncAllFilesProgress } from '../store/database'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -95,6 +95,9 @@ export async function setupProject(config: ProjectConfig, forceReparse: boolean 
   // Khởi tạo DB
   initDatabase(normalizedConfig.gameFolderPath)
 
+  // Khôi phục các block bị kẹt do app crash
+  recoverOrphanedTasks()
+
   // Nếu project đã được parse trước đó và không ép reparse → skip parsing
   if (isProjectAlreadyParsed() && !forceReparse) {
     console.log('[ProjectSetup] Project already parsed, skipping re-parse. Loading from existing DB.')
@@ -135,6 +138,12 @@ export async function openProject(config: ProjectConfig): Promise<void> {
   // Chỉ khởi tạo DB connection, KHÔNG gọi parseProject
   initDatabase(normalizedConfig.gameFolderPath)
 
+  // Khôi phục các block bị kẹt do app crash
+  recoverOrphanedTasks()
+
+  // Đồng bộ progress counters từ DB (fix UI 0%)
+  syncAllFilesProgress()
+
   // Update recent list
   addRecentProject(normalizedConfig)
   console.log('[ProjectSetup] Project opened from existing DB:', normalizedConfig)
@@ -165,13 +174,16 @@ export async function deleteProject(gameFolderPath: string, deleteFiles: boolean
   const filtered = current.filter(p => p.gameFolderPath !== gameFolderPath)
   saveRecentProjects(filtered)
 
-  // 2. Đóng database và release memory
+  // 2. Vacuum database để reclaim disk space trước khi đóng
+  vacuumDatabase()
+
+  // 3. Đóng database và release memory
   closeDatabase()
 
-  // 3. Wait for OS to release file locks (CRITICAL FIX FOR EBUSY)
+  // 4. Wait for OS to release file locks (CRITICAL FIX FOR EBUSY)
   await new Promise<void>((resolve) => setTimeout(() => resolve(), 200))
 
-  // 4. Xóa database file (tìm file thực tế, không tạo mới)
+  // 5. Xóa database file (tìm file thực tế, không tạo mới)
   try {
     const gameName = getGameFolderName(gameFolderPath)
     const dbPath = findExistingDbPath(gameName)
@@ -189,7 +201,7 @@ export async function deleteProject(gameFolderPath: string, deleteFiles: boolean
     console.error('[ProjectSetup] Failed to delete database:', err)
   }
 
-  // 5. Xóa file dịch nếu user yêu cầu
+  // 6. Xóa file dịch nếu user yêu cầu
   if (deleteFiles) {
     try {
       const project = filtered.find(p => p.gameFolderPath === gameFolderPath)

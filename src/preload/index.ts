@@ -180,7 +180,7 @@ interface RendererApi {
     get: () => Promise<AppSettings>
     save: (settings: Partial<AppSettings>) => Promise<void>
     testConnection: () => Promise<{ ok: boolean; error?: string }>
-    listModels: (provider?: string) => Promise<string[]>
+    listModels: (provider?: string, config?: { apiKey?: string; baseURL?: string; customHeaders?: Record<string, string> }) => Promise<string[]>
     selectDbFolder: () => Promise<string | null>
   }
   export: {
@@ -277,7 +277,7 @@ const api: RendererApi = {
     get: () => ipcRenderer.invoke('settings:get') as Promise<AppSettings>,
     save: (settings: Partial<AppSettings>) => ipcRenderer.invoke('settings:save', settings) as Promise<void>,
     testConnection: () => ipcRenderer.invoke('settings:testConnection') as Promise<{ ok: boolean; error?: string }>,
-    listModels: (provider?: string) => ipcRenderer.invoke('settings:listModels', provider) as Promise<string[]>,
+    listModels: (provider?: string, config?: { apiKey?: string; baseURL?: string; customHeaders?: Record<string, string> }) => ipcRenderer.invoke('settings:listModels', provider, config) as Promise<string[]>,
     selectDbFolder: () => ipcRenderer.invoke('settings:selectDbFolder') as Promise<string | null>
   },
   export: {

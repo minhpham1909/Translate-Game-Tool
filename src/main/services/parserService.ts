@@ -1,17 +1,16 @@
 import fs from 'fs-extra'
 import path from 'path'
 import { parseRpyFile, importRpyToDatabase, importRpyToDatabaseDiff, type DiffSummary, type ParseResult } from '../parser/rpyParser'
-import { getDatabase } from '../store/database'
-import { getProjectConfig, getSettings } from '../store/settings'
+import { getDatabase, syncAllFilesProgress } from '../store/database'
 import { isAlreadyTranslated } from '../utils/langDetector'
 
-function applyDirtySourceHotfix(blocks: ParseResult['blocks'], targetLanguage: string): number {
+function applyDirtySourceHotfix(blocks: ParseResult['blocks']): number {
   let approvedCount = 0
 
   for (const block of blocks) {
     if (block.status !== 'empty') continue
 
-    if (isAlreadyTranslated(block.original_text, targetLanguage)) {
+    if (isAlreadyTranslated(block.original_text)) {
       block.status = 'approved'
       block.translated_text = block.original_text
       approvedCount++
@@ -83,7 +82,7 @@ function resetWorkspaceTables(): void {
  * @param gameFolderPath Đường dẫn tuyệt đối đến game/
  * @param sourceLanguage Ngôn ngữ nguồn (vd: english, hoặc 'None' cho file gốc)
  */
-export async function parseProject(gameFolderPath: string, sourceLanguage: string, targetLanguage?: string): Promise<void> {
+export async function parseProject(gameFolderPath: string, sourceLanguage: string, _targetLanguage?: string): Promise<void> {
   // Không cho phép parse với target = None (nếu gọi nhầm)
   if (sourceLanguage === 'None') {
     console.warn('[ParserService] Source = None, sẽ quét từ game/ thay vì tl/None/')
@@ -112,8 +111,6 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
   console.log(`[ParserService] Target dir: ${targetDir}`)
   console.log(`[ParserService] Found ${rpyFiles.length} files. Parsing...`)
 
-  const effectiveTargetLanguage = targetLanguage || getSettings().targetLanguage
-
   // Parse và Import từng file
   let processedFiles = 0
   let totalBlocks = 0
@@ -126,7 +123,7 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
 
       // Dirty Source Hotfix: auto-approve blocks already in target language.
       // During initial setup, project config isn't persisted yet, so use AppSettings.targetLanguage.
-      const approvedCount = applyDirtySourceHotfix(parseResult.blocks, effectiveTargetLanguage)
+      const approvedCount = applyDirtySourceHotfix(parseResult.blocks)
       if (approvedCount > 0) recomputeFileRecordStats(parseResult)
 
       // Import vào DB nếu file có dữ liệu (có blocks hoặc file rỗng thì tạo record rỗng)
@@ -139,6 +136,9 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
       console.error(`[ParserService] Failed to parse file ${filePath}:`, error)
     }
   }
+
+  // Đồng bộ progress counters sau khi parse
+  syncAllFilesProgress()
 
   console.log(`[ParserService] Parse complete ${processedFiles}/${rpyFiles.length} files. Total blocks=${totalBlocks}`)
   if (processedFiles === 0) {
@@ -202,9 +202,7 @@ export async function parseProjectDiff(
 
       // Dirty Source Hotfix: when new version contains already-translated (target-language) text,
       // auto-approve it so it won't be sent to AI again.
-      // Prefer current project config if available; fallback to app settings.
-      const targetLanguage = getProjectConfig()?.targetLanguage || getSettings().targetLanguage
-      const approvedCount = applyDirtySourceHotfix(parseResult.blocks, targetLanguage)
+      const approvedCount = applyDirtySourceHotfix(parseResult.blocks)
       if (approvedCount > 0) recomputeFileRecordStats(parseResult)
 
       // Find the old file ID by relative path

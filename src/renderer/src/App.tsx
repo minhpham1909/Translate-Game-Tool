@@ -11,6 +11,7 @@ import { WelcomeScreen } from '@renderer/components/screens/WelcomeScreen'
 import { SetupWizardModal } from '@renderer/components/screens/SetupWizardModal'
 import { PreflightModal } from '@renderer/components/screens/PreflightModal'
 import { ExportModal } from '@renderer/components/screens/ExportModal'
+import { RestoreModal } from '@renderer/components/screens/RestoreModal'
 import { QAReportModal } from '@renderer/components/screens/QAReportModal'
 import { TMManagerModal } from '@renderer/components/screens/TMManagerModal'
 import { GlossaryModal, type GlossaryEntry as GlossaryModalEntry } from '@renderer/components/screens/GlossaryModal'
@@ -50,6 +51,7 @@ interface ModalState {
   setupWizard: boolean
   preflight: boolean
   export: boolean
+  restore: boolean
   qaReport: boolean
   tmManager: boolean
   glossary: boolean
@@ -60,6 +62,7 @@ interface ModalState {
 
 const DEFAULT_MODAL_STATE: ModalState = {
   settings: false, setupWizard: false, preflight: false, export: false,
+  restore: false,
   qaReport: false, tmManager: false, glossary: false, searchReplace: false,
   keyboardShortcuts: false, updateGame: false,
 }
@@ -387,6 +390,7 @@ function CATWorkspace({
         sourceLanguage="english"
         onSettingsClick={() => openModal('settings')}
         onExportClick={() => openModal('export')}
+        onRestoreClick={() => openModal('restore')}
         onPreflightClick={() => openModal('preflight')}
         onSearchClick={() => openModal('searchReplace')}
         onQAClick={() => openModal('qaReport')}
@@ -451,6 +455,11 @@ function CATWorkspace({
       <ExportModal
         open={modals.export}
         onOpenChange={(o) => setModals((p) => ({ ...p, export: o }))}
+      />
+
+      <RestoreModal
+        open={modals.restore}
+        onOpenChange={(o) => setModals((p) => ({ ...p, restore: o }))}
       />
 
       <QAReportModal

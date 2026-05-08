@@ -62,13 +62,14 @@ export function updateBlockTranslation(blockId: number, translatedText: string |
 
 /**
  * Cập nhật thông số file (tổng block đã dịch, trạng thái file)
+ * Bao gồm cả 'modified' vì các block đã sửa cũng được tính vào tiến độ.
  */
 function updateFileStats(db: any, fileId: number) {
-  // Lấy tổng số block và số block đã dịch (status in 'draft', 'approved', 'warning')
+  // Lấy tổng số block và số block đã dịch (status not 'empty')
   const stats = db.prepare(`
     SELECT 
       COUNT(*) as total,
-      SUM(CASE WHEN status IN ('draft', 'approved', 'warning') THEN 1 ELSE 0 END) as translated
+      SUM(CASE WHEN status != 'empty' THEN 1 ELSE 0 END) as translated
     FROM translation_blocks
     WHERE file_id = ?
   `).get(fileId) as { total: number, translated: number }

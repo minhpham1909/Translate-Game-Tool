@@ -55,9 +55,9 @@ export function ExportModal({ open, onOpenChange }: ExportModalProps) {
     return () => { cancelled = true }
   }, [open, activeTab])
 
-  // Load backups when modal opens
+  // Load backups when modal opens (bất kể tab nào)
   useEffect(() => {
-    if (!open || activeTab !== 'backups') return
+    if (!open) return
     let cancelled = false
     void window.api.export.listBackups().then((data) => {
       if (!cancelled) setBackups(data)
@@ -65,7 +65,7 @@ export function ExportModal({ open, onOpenChange }: ExportModalProps) {
       console.error('Failed to load backups:', err)
     })
     return () => { cancelled = true }
-  }, [open, activeTab])
+  }, [open])
 
   const toggleFileSelection = useCallback((fileId: number) => {
     setSelectedFileIds(prev =>

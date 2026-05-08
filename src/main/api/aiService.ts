@@ -88,7 +88,10 @@ function buildPromptMetrics(texts: string[], glossaryText: string, contextHistor
 function isPromptTokenLimitError(error: unknown): boolean {
   if (error instanceof APIError) {
     const response = error.response || ''
-    return /prompt tokens limit exceeded/i.test(response) || /prompt tokens limit exceeded/i.test(error.message)
+    const text = response + ' ' + error.message
+    // Không phải lỗi prompt token nếu là credit/upgrade issue
+    if (/upgrade to a paid account/i.test(text) || /nâng cấp tài khoản/i.test(text)) return false
+    return /prompt tokens? (limit|exceed)/i.test(text) || /context.*exceed/i.test(text) || /max_tokens/i.test(text)
   }
   return false
 }
@@ -244,14 +247,18 @@ function setCachedModels(providerId: string, config: { apiKey?: string; baseURL?
 // ============================================================================
 
 const NON_TEXT_KEYWORDS = [
-  'video', 'image', 'audio', 'speech', 'music', 'whisper',
+  'video', 'image-gen', 'audio', 'speech', 'music', 'whisper',
   'dall-e', 'midjourney', 'flux', 'tts', 'stt', 'realtime',
-  'generate', 'edit', 'inpaint', 'outpaint', 'upscale',
-  'embedding', 'embed', 'moderation', 'mod',
+  'inpaint', 'outpaint', 'upscale',
+  'embedding', 'embed', 'moderation', 'moderations',
   'text-to-video', 'text-to-speech', 'text-to-image',
   'video-to-video', 'image-to-video', 'image-to-image',
   'voice', 'sound', 'musicgen', 'audiocraft',
   'dubbing', 'translate-audio',
+  'remove-background', 'background-removal',
+  'controlnet', 'scribble', 'depth', 'normal-map',
+  'stable-diffusion', 'sdxl', 'sd3', 'sdxl-', 'sd-',
+  'adapter', 'lora', 'prompt-generator',
 ]
 
 const LLM_KEYWORDS = [
@@ -259,11 +266,22 @@ const LLM_KEYWORDS = [
   'gemma', 'gemini', 'phi', 'command', 'yi', 'mixtral',
   'zephyr', 'dbrx', 'falcon', 'olmo', 'mamba', 'vicuna',
   'wizardlm', 'codellama', 'nous', 'solar', 'nous-hermes',
-  'minicpm', 'intern', 'yi', 'chatglm', 'qwen', 'baichuan',
+  'minicpm', 'intern', 'chatglm', 'baichuan',
   'openchat', 'starling', 'airoboros', 'openhermes',
   'neural', 'grok', 'sonnet', 'opus', 'haiku',
   'o1', 'o3', 'o4', 'gpt-4', 'gpt-3',
   'claude-', 'llama-', 'mistral-', 'qwen-', 'deepseek-',
+  'dbrx-', 'falcon-', 'olmo-', 'mamba-', 'vicuna-',
+  'dolphin', 'nemotron', 'hermes', 'athena', 'prometheus',
+  'eva', 'eva-', 'magnum', 'maid', 'nemo', 'kano',
+  'airoboros', 'samantha', 'tulu', 'cai', 'sauerkraut',
+  'beagle', 'cat', 'fox', 'raven', 'crown', 'midnight',
+  'eagle', 'opt', 'bloom', 'pythia', 'dolly',
+  'stablelm', 'replit', 'codegemma', 'codeqwen',
+  'starcoder', 'granite', 'merlinite', 'instruct',
+  'jamba', 'arctic', 'striped', 'snowflake',
+  'aya', 'cohere', 'c4ai-',
+  'o3-', 'o4-', 'claude-sonnet', 'claude-opus', 'claude-haiku',
 ]
 
 /**
@@ -487,14 +505,21 @@ ${glossaryText ? `\nGLOSSARY (follow these terms):\n${glossaryText}` : ''}`
 
   /**
    * List available models for a given provider.
+   * @param providerOverride Provider ID override (e.g., 'openai_compatible')
+   * @param configOverride Optional provider config to use INSTEAD of saved settings (for UI preview)
    */
-  static async listModels(providerOverride?: string): Promise<string[]> {
+  static async listModels(
+    providerOverride?: string,
+    configOverride?: { apiKey?: string; baseURL?: string; customHeaders?: Record<string, string> }
+  ): Promise<string[]> {
     const settings = getSettings()
     const activeProvider = (providerOverride || settings.activeProviderId || 'gemini').toLowerCase()
-    const config = settings.providers[activeProvider as keyof typeof settings.providers]
+    // Use configOverride if provided (from UI), otherwise read from saved settings
+    const savedConfig = settings.providers[activeProvider as keyof typeof settings.providers]
+    const config = configOverride || savedConfig
     const apiKey = config?.apiKey || ''
 
-    const fallback = (config?.modelId || '').trim() ? [config.modelId] : []
+    const fallback = (savedConfig?.modelId || '').trim() ? [savedConfig.modelId] : []
 
     if (!apiKey) return fallback
 

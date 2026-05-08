@@ -146,28 +146,30 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     return () => { cancelled = true }
   }, [open])
 
-  // Load models when provider changes
+  // Load models when provider changes, or when API key/baseURL changes (debounced)
   useEffect(() => {
     if (!open) return
     let cancelled = false
-
-    const listModelProvider = providerId === 'openai_compatible' ? 'openai_compatible' : providerId
-
-    void window.api.settings
-      .listModels(listModelProvider)
-      .then((models) => {
-        if (cancelled) return
-        setAvailableModels(models)
-        const currentModel = providerConfigs[providerId]?.modelId || ''
-        if (models.length > 0 && !models.includes(currentModel)) {
-          setField('modelId', models[0])
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setAvailableModels([])
-      })
-    return () => { cancelled = true }
-  }, [open, providerId])
+    const timer = setTimeout(() => {
+      const listModelProvider = providerId === 'openai_compatible' ? 'openai_compatible' : providerId
+      // Pass current UI config so listModels doesn't read stale saved settings
+      const currentConfig = providerConfigs[providerId]
+      void window.api.settings
+        .listModels(listModelProvider, currentConfig)
+        .then((models) => {
+          if (cancelled) return
+          setAvailableModels(models)
+          const currentModel = providerConfigs[providerId]?.modelId || ''
+          if (models.length > 0 && !models.includes(currentModel)) {
+            setField('modelId', models[0])
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setAvailableModels([])
+        })
+    }, 400)
+    return () => { clearTimeout(timer); cancelled = true }
+  }, [open, providerId, providerConfigs[providerId]?.apiKey, providerConfigs[providerId]?.baseURL])
 
   // Close model dropdown when clicking outside
   useEffect(() => {
@@ -189,7 +191,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     setField('modelId', modelId)
     setModelSearch('')
     setModelDropdownOpen(false)
-  }, [])
+  }, [setField])
 
   const handleSave = async (): Promise<void> => {
     await window.api.settings.save({

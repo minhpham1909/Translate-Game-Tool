@@ -95,8 +95,8 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('settings:listModels', async (_, provider?: string) => {
-    return AIService.listModels(provider)
+  ipcMain.handle('settings:listModels', async (_, provider?: string, config?: { apiKey?: string; baseURL?: string; customHeaders?: Record<string, string> }) => {
+    return AIService.listModels(provider, config)
   })
 
   // --- Glossary ---

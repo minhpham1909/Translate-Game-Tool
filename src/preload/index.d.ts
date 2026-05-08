@@ -109,6 +109,7 @@ export interface DiffSummary {
 export interface BackupEntry {
   fileId: number
   fileName: string
+  filePath: string
   backupPath: string
   createdAt: string
   fileSize: number
@@ -194,7 +195,7 @@ declare global {
         get: () => Promise<AppSettings>
         save: (settings: Partial<AppSettings>) => Promise<void>
         testConnection: () => Promise<{ ok: boolean; error?: string }>
-        listModels: (provider?: string) => Promise<string[]>
+        listModels: (provider?: string, config?: { apiKey?: string; baseURL?: string; customHeaders?: Record<string, string> }) => Promise<string[]>
         selectDbFolder: () => Promise<string | null>
       }
       export: {

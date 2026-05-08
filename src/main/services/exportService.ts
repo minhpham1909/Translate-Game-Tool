@@ -1,12 +1,13 @@
 import fs from 'fs-extra'
 import path from 'path'
-import { getDatabase } from '../store/database'
+import { getDatabase, syncAllFilesProgress } from '../store/database'
 import { getProjectConfig } from '../store/settings'
 import { FileRecord, TranslationBlock } from '../../shared/types'
 
 export interface BackupEntry {
   fileId: number
   fileName: string
+  filePath: string
   backupPath: string
   createdAt: string
   fileSize: number
@@ -97,7 +98,20 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
   const exists = await fs.pathExists(sourcePath)
   if (!exists) throw new Error(`Source file not found: ${sourcePath}`)
 
-  // 3. CRITICAL: Sao lưu file gốc trước khi ghi đè (Direct Overwrite)
+  // 3. Write Permission Pre-flight Check
+  const targetDir = path.dirname(targetPath)
+  const testFilePath = path.join(targetDir, '.vnt_write_test')
+  try {
+    await fs.writeFile(testFilePath, '', 'utf8')
+    await fs.remove(testFilePath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EPERM' || (err as NodeJS.ErrnoException).code === 'EACCES') {
+      throw new Error('Write permission denied. Please run the app as Administrator or move the game folder to a different location (e.g., Desktop or D: drive).')
+    }
+    throw err
+  }
+
+  // 4. Backup file gốc trước khi ghi đè (Direct Overwrite)
   // Target path = Source path (ghi đè chính nó)
   if (await fs.pathExists(targetPath)) {
     const timestamp = new Date().getTime()
@@ -106,7 +120,7 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
     console.log(`[Export] Backup created: ${backupPath}`)
   }
 
-    // 4. Đọc file Source và thực hiện "Trojan Horse" Overwrite
+    // 5. Đọc file Source và thực hiện "Trojan Horse" Overwrite
   // QUAN TRỌNG: GIỮ NGUYÊN header (vd: translate english:), CHỈ thay text bên trong
   const sourceContent = await fs.readFile(sourcePath, 'utf8')
   // Xử lý cả CRLF và LF
@@ -170,18 +184,18 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
     targetLines.push(line)
   }
 
-  // 5. Ghi file Target (Đảm bảo luôn chèn CRLF để file chuẩn trên Windows)
+  // 6. Ghi file Target (Đảm bảo luôn chèn CRLF để file chuẩn trên Windows)
   // DIRECT OVERWRITE: targetPath = sourcePath, không cần ensureDir
   await fs.writeFile(targetPath, targetLines.join('\r\n'), 'utf8')
 
-  // 6. Xóa file .rpyc cũ để Ren'Py buộc recompile (Hullfix RPYC Deletion)
+  // 7. Xóa file .rpyc cũ để Ren'Py buộc recompile (Hullfix RPYC Deletion)
   const rpycPath = targetPath + 'c' // script.rpy -> script.rpyc
   if (await fs.pathExists(rpycPath)) {
     await fs.remove(rpycPath)
     console.log(`[Export] Deleted old compiled file to force recompilation: ${rpycPath}`)
   }
 
-  // 7. Cập nhật trạng thái
+  // 8. Cập nhật trạng thái
   db.prepare(`UPDATE files SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fileId)
   console.log(`[Export] Exported: ${targetPath}`)
 }
@@ -274,16 +288,20 @@ export async function listBackups(): Promise<BackupEntry[]> {
   const backups: BackupEntry[] = []
 
   for (const file of files) {
-    const targetDir = path.join(project.gameFolderPath, 'tl', project.targetLanguage, path.dirname(file.file_path))
+    // Direct Overwrite: backup được lưu ở source path, KHÔNG phải tl/{target}/
+    const sourceBase = project.sourceLanguage === 'None'
+      ? project.gameFolderPath
+      : path.join(project.gameFolderPath, 'tl', project.sourceLanguage)
+    const sourceDir = path.join(sourceBase, path.dirname(file.file_path))
 
-    if (!await fs.pathExists(targetDir)) continue
+    if (!await fs.pathExists(sourceDir)) continue
 
-    const dirEntries = await fs.readdir(targetDir)
+    const dirEntries = await fs.readdir(sourceDir)
+    const baseName = path.basename(file.file_path)
     for (const entry of dirEntries) {
-      if (entry.startsWith(`${path.basename(file.file_path)}.backup_`)) {
-        const fullPath = path.join(targetDir, entry)
+      if (entry.startsWith(`${baseName}.backup_`)) {
+        const fullPath = path.join(sourceDir, entry)
         const stat = await fs.stat(fullPath)
-        // Extract timestamp from backup filename
         const timestampMatch = entry.match(/\.backup_(\d+)$/)
         const createdAt = timestampMatch
           ? new Date(parseInt(timestampMatch[1])).toLocaleString('vi-VN')
@@ -295,6 +313,7 @@ export async function listBackups(): Promise<BackupEntry[]> {
         backups.push({
           fileId,
           fileName: file.file_name,
+          filePath: file.file_path,
           backupPath: fullPath,
           createdAt,
           fileSize: stat.size ?? 0,
@@ -303,7 +322,6 @@ export async function listBackups(): Promise<BackupEntry[]> {
     }
   }
 
-  // Sort by date descending (newest first)
   backups.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
   return backups
@@ -311,6 +329,7 @@ export async function listBackups(): Promise<BackupEntry[]> {
 
 /**
  * Phục hồi file gốc từ bản backup.
+ * 4 bước: copy file → xoá .rpyc → reset DB blocks → sync progress
  * @param fileId File ID cần restore
  * @param backupFilePath Đường dẫn tới file backup
  */
@@ -323,12 +342,36 @@ export async function restoreFileBackup(fileId: number, backupFilePath: string):
   const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
   if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
 
-  const exists = await fs.pathExists(backupFilePath)
-  if (!exists) throw new Error(`Backup file not found: ${backupFilePath}`)
+  if (!(await fs.pathExists(backupFilePath))) {
+    throw new Error(`Backup file not found: ${backupFilePath}`)
+  }
 
-  const targetPath = path.join(project.gameFolderPath, 'tl', project.targetLanguage, fileRecord.file_path)
-  await fs.copy(backupFilePath, targetPath)
-  console.log(`[Export] Restored ${fileRecord.file_name} from backup: ${backupFilePath}`)
+  // Direct Overwrite: restore về source path (nơi backup được tạo ra)
+  const sourceBase = project.sourceLanguage === 'None'
+    ? project.gameFolderPath
+    : path.join(project.gameFolderPath, 'tl', project.sourceLanguage)
+  const targetRpyPath = path.join(sourceBase, fileRecord.file_path)
+
+  // STEP 1: Overwrite physical file with backup
+  await fs.copy(backupFilePath, targetRpyPath, { overwrite: true })
+
+  // STEP 2: Force Ren'Py to recompile by deleting .rpyc
+  const rpycPath = targetRpyPath + 'c'
+  if (await fs.pathExists(rpycPath)) {
+    await fs.remove(rpycPath)
+  }
+
+  // STEP 3: Reset DB blocks (keep original_text, wipe translation)
+  db.prepare(`
+    UPDATE translation_blocks
+    SET translated_text = NULL, status = 'empty'
+    WHERE file_id = ?
+  `).run(fileId)
+
+  // STEP 4: Sync UI progress
+  syncAllFilesProgress()
+
+  console.log(`[Restore] Restored ${fileRecord.file_name} from backup, blocks reset to empty`)
 }
 
 /**
