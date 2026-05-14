@@ -73,34 +73,39 @@ export function getActiveDbPath(): string | null {
  * Tìm đường dẫn file DB thực tế cho gameName (không tạo mới).
  * Quét các file vnt_{gameName}.sqlite, vnt_{gameName}_2.sqlite, ...
  */
+/**
+ * Tìm đường dẫn file DB thực tế cho gameName (không tạo mới).
+ * CHỈ quét các file vnt_{gameName}.sqlite, vnt_{gameName}_2.sqlite, ...
+ * TUYỆT ĐỐI KHÔNG dùng fallback translation_project.sqlite để tránh lỗi chéo DB (Crossover).
+ */
 export function findExistingDbPath(gameName: string): string | null {
   const customFolder = getCustomDbFolder()
-  
+
   let dbDir: string
   if (customFolder && fs.existsSync(customFolder)) {
     dbDir = customFolder
   } else {
     dbDir = path.join(app.getPath('userData'), 'db')
   }
-  
-  // Thử các pattern có thể có
+
   const baseName = `vnt_${gameName}`
+
+  // STRICT IDENTITY: Only look for files matching this specific game's base name
   const candidates = [
-    path.join(dbDir, `${baseName}.sqlite`),
-    path.join(dbDir, `translation_project.sqlite`),  // fallback default
+    path.join(dbDir, `${baseName}.sqlite`)
   ]
-  
-  // Thử thêm _2, _3, ... (collision handling)
+
+  // Handle collision variants (_2, _3, etc.)
   for (let i = 2; i <= 10; i++) {
     candidates.push(path.join(dbDir, `${baseName}_${i}.sqlite`))
   }
-  
+
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       return candidate
     }
   }
-  
+
   return null
 }
 

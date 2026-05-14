@@ -204,6 +204,7 @@ declare global {
         exportSelected: (fileIds: number[], approvedOnly: boolean) => Promise<ExportResult>
         listBackups: () => Promise<BackupEntry[]>
         restoreBackup: (fileId: number, backupPath: string) => Promise<void>
+        restoreToOriginal: (fileId: number) => Promise<void>
       }
     }
   }

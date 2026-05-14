@@ -111,13 +111,13 @@ export async function exportFile(fileId: number, approvedOnly: boolean = false):
     throw err
   }
 
-  // 4. Backup file gốc trước khi ghi đè (Direct Overwrite)
-  // Target path = Source path (ghi đè chính nó)
+  // 4. Master Backup: chỉ tạo 1 lần duy nhất (.vnt_orig)
   if (await fs.pathExists(targetPath)) {
-    const timestamp = new Date().getTime()
-    const backupPath = `${targetPath}.backup_${timestamp}`
-    await fs.copy(targetPath, backupPath)
-    console.log(`[Export] Backup created: ${backupPath}`)
+    const masterBackupPath = `${targetPath}.vnt_orig`
+    if (!(await fs.pathExists(masterBackupPath))) {
+      await fs.copy(targetPath, masterBackupPath)
+      console.log(`[Export] Created Master Backup: ${masterBackupPath}`)
+    }
   }
 
     // 5. Đọc file Source và thực hiện "Trojan Horse" Overwrite
@@ -372,6 +372,30 @@ export async function restoreFileBackup(fileId: number, backupFilePath: string):
   syncAllFilesProgress()
 
   console.log(`[Restore] Restored ${fileRecord.file_name} from backup, blocks reset to empty`)
+}
+
+/**
+ * Database-Driven Restore: xoá translations trong DB rồi re-export.
+ * Không cần physical backup — dùng original_text từ DB để khôi phục.
+ * @param fileId File ID cần restore về bản gốc
+ */
+export async function restoreFileToOriginal(fileId: number): Promise<void> {
+  const db = getDatabase()
+  if (!db) throw new Error('Database not initialized')
+
+  // STEP 1: Wipe all translations for this file (giữ original_text)
+  db.prepare(`
+    UPDATE translation_blocks
+    SET translated_text = NULL, status = 'empty'
+    WHERE file_id = ?
+  `).run(fileId)
+
+  // STEP 2: Sync UI progress immediately
+  syncAllFilesProgress()
+
+  // STEP 3: Re-export — translated_text = NULL → exportFile dùng original_text
+  await exportFile(fileId)
+  console.log(`[Restore] Successfully restored fileId ${fileId} via DB reset + re-export`)
 }
 
 /**
