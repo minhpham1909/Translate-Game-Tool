@@ -334,44 +334,27 @@ export async function listBackups(): Promise<BackupEntry[]> {
  * @param backupFilePath Đường dẫn tới file backup
  */
 export async function restoreFileBackup(fileId: number, backupFilePath: string): Promise<void> {
-  const db = getDatabase()
-  const project = getProjectConfig()
+  void backupFilePath
+  await restoreFileToOriginal(fileId)
+}
 
-  if (!project) throw new Error('Project config is not set.')
+export async function restoreFileToOriginal(fileId: number): Promise<void> {
+  const db = getDatabase()
 
   const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
   if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
 
-  if (!(await fs.pathExists(backupFilePath))) {
-    throw new Error(`Backup file not found: ${backupFilePath}`)
-  }
-
-  // Direct Overwrite: restore về source path (nơi backup được tạo ra)
-  const sourceBase = project.sourceLanguage === 'None'
-    ? project.gameFolderPath
-    : path.join(project.gameFolderPath, 'tl', project.sourceLanguage)
-  const targetRpyPath = path.join(sourceBase, fileRecord.file_path)
-
-  // STEP 1: Overwrite physical file with backup
-  await fs.copy(backupFilePath, targetRpyPath, { overwrite: true })
-
-  // STEP 2: Force Ren'Py to recompile by deleting .rpyc
-  const rpycPath = targetRpyPath + 'c'
-  if (await fs.pathExists(rpycPath)) {
-    await fs.remove(rpycPath)
-  }
-
-  // STEP 3: Reset DB blocks (keep original_text, wipe translation)
   db.prepare(`
     UPDATE translation_blocks
     SET translated_text = NULL, status = 'empty'
     WHERE file_id = ?
   `).run(fileId)
 
-  // STEP 4: Sync UI progress
+  syncAllFilesProgress()
+  await exportFile(fileId, false)
   syncAllFilesProgress()
 
-  console.log(`[Restore] Restored ${fileRecord.file_name} from backup, blocks reset to empty`)
+  console.log(`[Restore] Restored ${fileRecord.file_name} via DB reset`)
 }
 
 /**
@@ -403,6 +386,7 @@ export async function restoreFileToOriginal(fileId: number): Promise<void> {
  * @deprecated Use restoreFileBackup instead
  */
 export async function restoreBackup(fileId: number, backupFilePath: string): Promise<void> {
-  return restoreFileBackup(fileId, backupFilePath)
+  void backupFilePath
+  return restoreFileToOriginal(fileId)
 }
 

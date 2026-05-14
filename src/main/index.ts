@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase, closeDatabase } from './store/database'
+import { initGlobalDatabase, closeGlobalDatabase } from './store/globalDb'
 import { registerIpcHandlers } from './ipcHandler'
 
 function createWindow(): void {
@@ -59,6 +60,7 @@ app.whenReady().then(() => {
 
   try {
     initDatabase()
+    initGlobalDatabase()
     console.log('[System] Database initialized successfully')
   } catch (err) {
     console.error('[System] Failed to initialize database:', err)
@@ -84,6 +86,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   closeDatabase()
+  closeGlobalDatabase()
   console.log('[System] Database connection closed')
 })
 

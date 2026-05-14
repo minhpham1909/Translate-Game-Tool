@@ -55,7 +55,7 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RotateCcw className="size-4" />
-            Restore Backup
+            Restore to Original
           </DialogTitle>
         </DialogHeader>
 
@@ -64,7 +64,9 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
             'flex items-center gap-2 px-3 py-2 rounded-md text-xs',
             message.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
           )}>
-            {message.type === 'success' ? <CheckCircle2 className="size-3.5 flex-shrink-0" /> : <AlertCircle className="size-3.5 flex-shrink-0" />}
+            {message.type === 'success'
+              ? <CheckCircle2 className="size-3.5 flex-shrink-0" />
+              : <AlertCircle className="size-3.5 flex-shrink-0" />}
             {message.text}
           </div>
         )}
@@ -113,8 +115,8 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
                         Restore
                       </Button>
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             </ScrollArea>
           )}

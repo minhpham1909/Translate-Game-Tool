@@ -4,6 +4,7 @@ import { addRecentProject, getProjectConfig, getRecentProjects as readRecentProj
 import { ProjectConfig, RecentProject, normalizeLanguageCode } from '../../shared/types'
 import { getAllFiles, parseProject } from '../services/parserService'
 import { initDatabase, getDatabase, getGameFolderName, findExistingDbPath, closeDatabase, recoverOrphanedTasks, vacuumDatabase, syncAllFilesProgress } from '../store/database'
+import { migrateLegacyGlobalAssets } from '../store/globalDb'
 
 /**
  * Quét thư mục game/tl/ để lấy danh sách các ngôn ngữ có sẵn.
@@ -94,6 +95,7 @@ export async function setupProject(config: ProjectConfig, forceReparse: boolean 
 
   // Khởi tạo DB
   initDatabase(normalizedConfig.gameFolderPath)
+  migrateLegacyGlobalAssets(getDatabase())
 
   // Khôi phục các block bị kẹt do app crash
   recoverOrphanedTasks()
@@ -137,6 +139,7 @@ export async function openProject(config: ProjectConfig): Promise<void> {
 
   // Chỉ khởi tạo DB connection, KHÔNG gọi parseProject
   initDatabase(normalizedConfig.gameFolderPath)
+  migrateLegacyGlobalAssets(getDatabase())
 
   // Khôi phục các block bị kẹt do app crash
   recoverOrphanedTasks()
@@ -191,8 +194,8 @@ export async function deleteProject(gameFolderPath: string, deleteFiles: boolean
     if (dbPath && fs.existsSync(dbPath)) {
       await fs.remove(dbPath)
       // Xóa cả WAL/SHM files
-      try { await fs.remove(dbPath + '-wal') } catch {}
-      try { await fs.remove(dbPath + '-shm') } catch {}
+      try { await fs.remove(dbPath + '-wal') } catch { /* ignore missing WAL */ }
+      try { await fs.remove(dbPath + '-shm') } catch { /* ignore missing SHM */ }
       console.log(`[ProjectSetup] Deleted database: ${dbPath}`)
     } else {
       console.log(`[ProjectSetup] No database found for ${gameName}`)

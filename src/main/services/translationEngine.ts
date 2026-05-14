@@ -1,4 +1,5 @@
 import { getDatabase } from '../store/database'
+import { getGlobalDatabase, upsertGlobalTM } from '../store/globalDb'
 import { AIService, type ContextBlock } from '../api/aiService'
 import { TranslationBlock } from '../../shared/types'
 import { getSettings, getActiveProviderConfig } from '../store/settings'
@@ -58,7 +59,8 @@ function updateFileStats(db: Db, fileId: number): void {
 }
 
 function buildSmartGlossary(db: Db, batchTexts: string[], enabled: boolean): string {
-  const glossaries = db
+  void db
+  const glossaries = getGlobalDatabase()
     .prepare(`SELECT source_text, target_text FROM glossaries WHERE enabled = 1`)
     .all() as { source_text: string; target_text: string }[]
 
@@ -73,7 +75,8 @@ function buildSmartGlossary(db: Db, batchTexts: string[], enabled: boolean): str
 }
 
 function getRelevantGlossary(db: Db, batchTexts: string[], smartEnabled: boolean): GlossaryTerm[] {
-  const all = db
+  void db
+  const all = getGlobalDatabase()
     .prepare(`SELECT source_text, target_text FROM glossaries WHERE enabled = 1`)
     .all() as GlossaryTerm[]
 
@@ -219,11 +222,12 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
   const blockMapping: { [index: number]: TranslationBlock } = {}
 
   const enableTM = settings.enableTranslationMemory !== false
+  const globalDb = getGlobalDatabase()
   const stmtCheckTM = enableTM
-    ? db.prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
+    ? globalDb.prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
     : null
   const stmtUpdateTMUsage = enableTM
-    ? db.prepare(
+    ? globalDb.prepare(
         `UPDATE translation_memory SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE original_text = ?`
       )
     : null
@@ -391,16 +395,6 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
       }
     }
 
-    const stmtInsertTM = enableTM
-      ? db.prepare(
-          `
-            INSERT INTO translation_memory (original_text, translated_text)
-            VALUES (?, ?)
-            ON CONFLICT(original_text) DO NOTHING
-          `
-        )
-      : null
-
     // Save final translations
     db.transaction(() => {
       for (let i = 0; i < translatedTexts.length; i++) {
@@ -413,8 +407,8 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
         const status = errors.length > 0 ? 'warning' : 'draft'
         stmtUpdateBlock.run(finalText, providerName, status, blockId)
 
-        if (enableTM && stmtInsertTM && finalText !== block.original_text) {
-          stmtInsertTM.run(block.original_text, finalText)
+        if (enableTM && finalText !== block.original_text) {
+          upsertGlobalTM(block.original_text, finalText)
         }
       }
     })()
@@ -580,13 +574,13 @@ export async function startBackgroundQueue(
     }
 
     const stmtCheckTM = enableTM
-      ? db.prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
+      ? getGlobalDatabase().prepare(`SELECT translated_text FROM translation_memory WHERE original_text = ?`)
       : null
     const stmtUpdateBlock = db.prepare(
       `UPDATE translation_blocks SET translated_text = ?, translated_by = ?, status = ? WHERE id = ?`
     )
     const stmtUpdateTMUsage = enableTM
-      ? db.prepare(
+      ? getGlobalDatabase().prepare(
           `UPDATE translation_memory SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE original_text = ?`
         )
       : null
@@ -678,7 +672,7 @@ export async function startBackgroundQueue(
           if (blocksNeedingRetry.length > 0) {
             emitSystemLog('warning', `[Self-Correct] ${blocksNeedingRetry.length} block(s) need correction`)
 
-            let currentRetryTexts = blocksNeedingRetry.map(i => textsToTranslate[i])
+            const currentRetryTexts = blocksNeedingRetry.map(i => textsToTranslate[i])
             let currentRetryTranslations = translatedTexts.filter((_, i) => blocksNeedingRetry.includes(i))
 
             for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -738,14 +732,6 @@ export async function startBackgroundQueue(
             }
           }
 
-          const stmtInsertTM = enableTM
-            ? db.prepare(`
-                INSERT INTO translation_memory (original_text, translated_text)
-                VALUES (?, ?)
-                ON CONFLICT(original_text) DO NOTHING
-              `)
-            : null
-
           db.transaction(() => {
             for (let i = 0; i < translatedTexts.length; i++) {
               const translated = finalTranslations[i]
@@ -773,7 +759,7 @@ export async function startBackgroundQueue(
               }
 
               stmtUpdateBlock.run(translated, providerName, status, blockId)
-              if (enableTM && stmtInsertTM) stmtInsertTM.run(block.original_text, translated)
+              if (enableTM && translated !== block.original_text) upsertGlobalTM(block.original_text, translated)
               totalSuccess++
             }
 

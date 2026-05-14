@@ -107,14 +107,6 @@ interface DiffSummary {
   totalFiles: number
 }
 
-interface BackupEntry {
-  fileId: number
-  fileName: string
-  backupPath: string
-  createdAt: string
-  fileSize: number
-}
-
 interface ExportResult {
   exportedFiles: number
   totalFiles: number

@@ -3,7 +3,7 @@
  * Khu vực làm việc chính: Filter tabs + Virtualized list các TranslationCard.
  * Dùng "Scroll-to-render" pattern: chỉ render 20 item, load thêm khi cuộn.
  */
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, type ReactElement } from 'react'
 import { TranslationCard, UITranslationBlock, BlockStatus } from './TranslationCard'
 import { FloatingActionBar } from './FloatingActionBar'
 
@@ -43,7 +43,7 @@ export function TranslationWorkspace({
   onAITranslate,
   onBatchTranslate,
   onBatchApprove,
-}: TranslationWorkspaceProps) {
+}: TranslationWorkspaceProps): ReactElement {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all')
   const [renderedCount, setRenderedCount] = useState(RENDER_CHUNK_SIZE)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -64,9 +64,12 @@ export function TranslationWorkspace({
 
   // Reset về đầu mỗi khi đổi filter
   useEffect(() => {
-    setRenderedCount(RENDER_CHUNK_SIZE)
-    setSelectedIds(new Set())
-    setLastClickedId(null)
+    const timer = setTimeout(() => {
+      setRenderedCount(RENDER_CHUNK_SIZE)
+      setSelectedIds(new Set())
+      setLastClickedId(null)
+    }, 0)
+    return () => clearTimeout(timer)
   }, [activeFilter, blocks])
 
   // IntersectionObserver: load thêm khi loader div vào viewport
@@ -145,7 +148,7 @@ export function TranslationWorkspace({
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-background">
       {/* Filter Tabs */}
-      <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-border bg-card">
+      <div className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -191,7 +194,7 @@ export function TranslationWorkspace({
 
       {/* Virtualized Card List */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-3">
+        <div className="divide-y-0">
           {visibleBlocks.length === 0 ? (
             <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
               {blocks.length === 0

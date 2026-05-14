@@ -234,42 +234,15 @@ function setupSchema(db: Database.Database): void {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_blocks_status ON translation_blocks(status);`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_blocks_character ON translation_blocks(character_id);`)
 
-    // 3. Bảng translation_memory: Lưu lịch sử dịch để cache
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS translation_memory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        original_text TEXT UNIQUE NOT NULL,
-        translated_text TEXT NOT NULL,
-        usage_count INTEGER DEFAULT 1,
-        last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-
-    // 5. Bảng glossaries: Quản lý từ điển thuật ngữ
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS glossaries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source_text TEXT UNIQUE NOT NULL,
-        target_text TEXT NOT NULL,
-        notes TEXT,
-        enabled INTEGER DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
+    // Translation memory and glossaries live in global_assets.sqlite.
 
     // MIGRATION CHECK: Đảm bảo bảng translation_blocks có cột translated_by
-    const tableInfo = db.prepare(`PRAGMA table_info(translation_blocks);`).all() as any[];
+    const tableInfo = db.prepare(`PRAGMA table_info(translation_blocks);`).all() as Array<{ name: string }>;
     const hasTranslatedBy = tableInfo.some(col => col.name === 'translated_by');
     if (!hasTranslatedBy) {
       db.exec(`ALTER TABLE translation_blocks ADD COLUMN translated_by TEXT DEFAULT 'none';`);
     }
 
-    const glossaryInfo = db.prepare(`PRAGMA table_info(glossaries);`).all() as any[];
-    const hasGlossaryEnabled = glossaryInfo.some(col => col.name === 'enabled');
-    if (!hasGlossaryEnabled) {
-      db.exec(`ALTER TABLE glossaries ADD COLUMN enabled INTEGER DEFAULT 1;`);
-      db.exec(`UPDATE glossaries SET enabled = 1 WHERE enabled IS NULL;`);
-    }
   })
 
   // Thực thi Transaction

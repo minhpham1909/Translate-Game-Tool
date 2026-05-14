@@ -1,5 +1,8 @@
 import { getDatabase } from '../store/database'
+import { upsertGlobalTM } from '../store/globalDb'
 import { TranslationBlock } from '../../shared/types'
+
+type Db = ReturnType<typeof getDatabase>
 
 export interface DBFile {
   id: number
@@ -46,16 +49,62 @@ export function updateBlockTranslation(blockId: number, translatedText: string |
   const db = getDatabase()
   db.transaction(() => {
     // 1. Cập nhật block
+    const translatedBy = translatedText?.trim() ? 'manual' : 'none'
     db.prepare(`
       UPDATE translation_blocks 
-      SET translated_text = ?, status = ?
+      SET translated_text = ?, status = ?, translated_by = ?
       WHERE id = ?
-    `).run(translatedText, status, blockId)
+    `).run(translatedText, status, translatedBy, blockId)
 
     // 2. Lấy file_id để cập nhật lại thông số file
-    const block = db.prepare(`SELECT file_id FROM translation_blocks WHERE id = ?`).get(blockId) as { file_id: number }
+    const block = db.prepare(`SELECT file_id, original_text FROM translation_blocks WHERE id = ?`).get(blockId) as {
+      file_id: number
+      original_text: string
+    }
     if (block) {
       updateFileStats(db, block.file_id)
+      if (status === 'approved' && translatedText?.trim()) {
+        upsertGlobalTM(block.original_text, translatedText)
+      }
+    }
+  })()
+}
+
+export function batchApproveBlocks(blockIds: number[]): void {
+  const db = getDatabase()
+  const uniqueIds = Array.from(new Set(blockIds)).filter((id) => Number.isFinite(id))
+  if (uniqueIds.length === 0) return
+
+  const stmtGetBlock = db.prepare(`
+    SELECT id, file_id, original_text, translated_text, translated_by
+    FROM translation_blocks
+    WHERE id = ?
+  `)
+  const stmtApprove = db.prepare(`UPDATE translation_blocks SET status = 'approved' WHERE id = ?`)
+  const touchedFileIds = new Set<number>()
+
+  db.transaction(() => {
+    for (const id of uniqueIds) {
+      const block = stmtGetBlock.get(id) as {
+        id: number
+        file_id: number
+        original_text: string
+        translated_text: string | null
+        translated_by: string | null
+      } | undefined
+
+      if (!block) continue
+
+      stmtApprove.run(id)
+      touchedFileIds.add(block.file_id)
+
+      if (block.translated_text?.trim() && block.translated_by !== 'dirty_source') {
+        upsertGlobalTM(block.original_text, block.translated_text)
+      }
+    }
+
+    for (const fileId of touchedFileIds) {
+      updateFileStats(db, fileId)
     }
   })()
 }
@@ -64,7 +113,7 @@ export function updateBlockTranslation(blockId: number, translatedText: string |
  * Cập nhật thông số file (tổng block đã dịch, trạng thái file)
  * Bao gồm cả 'modified' vì các block đã sửa cũng được tính vào tiến độ.
  */
-function updateFileStats(db: any, fileId: number) {
+function updateFileStats(db: Db, fileId: number): void {
   // Lấy tổng số block và số block đã dịch (status not 'empty')
   const stats = db.prepare(`
     SELECT 
