@@ -1,14 +1,6 @@
-/**
- * TranslationCard.tsx
- * Card hiển thị một translation block: original text (trái) + textarea dịch (phải).
- * Có status badge, warning message, và các nút action (AI, Revert, Approve).
- * Debounce 500ms trước khi gọi update DB.
- */
 import { useCallback, useRef, type ReactElement } from 'react'
-import { Sparkles, RotateCcw, Check, AlertTriangle, GitBranch } from 'lucide-react'
+import { AlertTriangle, Check, GitBranch, RotateCcw, Sparkles } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
-import { Badge } from '@renderer/components/ui/badge'
-import { Textarea } from '@renderer/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { cn } from '@renderer/lib/utils'
 
@@ -27,35 +19,60 @@ export interface UITranslationBlock {
 
 interface TranslationCardProps {
   block: UITranslationBlock
-  /** Callback khi user sửa text (gọi sau debounce) */
   onTranslationChange: (blockId: number, value: string) => void
   onApprove: (blockId: number) => void
   onRevert: (blockId: number) => void
   onAITranslate: (blockId: number) => void
-  /** Multi-select props */
   isSelected?: boolean
   onSelect?: (blockId: number, event: React.MouseEvent) => void
 }
 
-const statusConfig: Record<BlockStatus, { label: string; className: string }> = {
-  empty:    { label: 'Empty',    className: 'bg-muted text-muted-foreground border-transparent' },
-  draft:    { label: 'Draft',    className: 'bg-info/20 text-info border-info/30' },
-  approved: { label: 'Approved', className: 'bg-success/20 text-success border-success/30' },
-  warning:  { label: 'Warning',  className: 'bg-warning/20 text-warning border-warning/30' },
-  skipped:  { label: 'Skipped',  className: 'bg-muted/30 text-muted-foreground border-border/30' },
-  modified: { label: 'Modified', className: 'bg-amber-500/20 text-amber-500 border-amber-500/30' },
+const statusConfig: Record<BlockStatus, { label: string; dot: string; rail: string; input: string }> = {
+  empty: {
+    label: 'Empty',
+    dot: 'bg-muted-foreground/40',
+    rail: 'border-l-transparent',
+    input: 'bg-muted/20',
+  },
+  draft: {
+    label: 'Draft',
+    dot: 'bg-info',
+    rail: 'border-l-info/70',
+    input: 'bg-info/[0.03]',
+  },
+  approved: {
+    label: 'Approved',
+    dot: 'bg-success',
+    rail: 'border-l-success/80',
+    input: 'bg-success/[0.03]',
+  },
+  warning: {
+    label: 'Warning',
+    dot: 'bg-warning',
+    rail: 'border-l-warning/80',
+    input: 'bg-warning/[0.04]',
+  },
+  skipped: {
+    label: 'Skipped',
+    dot: 'bg-muted-foreground/50',
+    rail: 'border-l-muted-foreground/40',
+    input: 'bg-muted/20',
+  },
+  modified: {
+    label: 'Modified',
+    dot: 'bg-amber-500',
+    rail: 'border-l-amber-500/80',
+    input: 'bg-amber-500/[0.04]',
+  },
 }
 
 const DEBOUNCE_MS = 500
 
-/**
- * TranslationCard component
- * @param block - Dữ liệu block từ DB
- * @param onTranslationChange - Gọi sau 500ms debounce
- * @param onApprove - Gán trạng thái approved
- * @param onRevert - Xóa bản dịch về empty
- * @param onAITranslate - Dịch block này bằng AI
- */
+function resizeTextarea(textarea: HTMLTextAreaElement): void {
+  textarea.style.height = 'auto'
+  textarea.style.height = `${textarea.scrollHeight}px`
+}
+
 export function TranslationCard({
   block,
   onTranslationChange,
@@ -69,10 +86,10 @@ export function TranslationCard({
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const textareaKey = `${block.id}:${block.status}:${block.translated_text ?? ''}`
 
-  // Debounce để tránh spam DB mỗi keystroke
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value
+      resizeTextarea(e.currentTarget)
+      const value = e.currentTarget.value
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
       debounceTimer.current = setTimeout(() => {
         onTranslationChange(block.id, value)
@@ -81,173 +98,131 @@ export function TranslationCard({
     [block.id, onTranslationChange]
   )
 
+  const handleInitialResize = useCallback((node: HTMLTextAreaElement | null) => {
+    if (node) resizeTextarea(node)
+  }, [])
+
+  const selectBlock = (event: React.MouseEvent): void => {
+    onSelect?.(block.id, event)
+  }
+
   return (
     <div
       id={`block-card-${block.id}`}
       className={cn(
-        'rounded-md border bg-card transition-colors',
-        block.status === 'warning' && 'border-warning/40',
-        block.status === 'approved' && 'border-success/20',
-        block.status === 'modified' && 'border-amber-500/40',
-        isSelected && 'border-primary/40 bg-primary/[0.04]'
+        'group flex w-full border-b border-border/40 border-l-2 bg-background hover:bg-accent/35 transition-colors',
+        config.rail,
+        isSelected && 'bg-primary/[0.05] border-l-primary'
       )}
     >
-      {/* Card Header */}
-      <div
-        className={cn(
-          'flex items-center justify-between px-3 py-2 border-b border-border/50 bg-surface-elevated/50',
-          onSelect && 'cursor-pointer hover:bg-accent/50 transition-colors'
+      <div className="w-[92px] flex-shrink-0 flex flex-col items-center gap-1.5 px-2 py-2 border-r border-border/40">
+        {onSelect && (
+          <button
+            type="button"
+            className={cn(
+              'size-4 rounded-sm border flex items-center justify-center transition-colors',
+              isSelected ? 'bg-primary border-primary text-primary-foreground' : 'border-border/70 hover:border-primary/70'
+            )}
+            aria-label={`Select block ${block.id}`}
+            aria-pressed={!!isSelected}
+            onClick={selectBlock}
+          >
+            {isSelected && <Check className="size-3" />}
+          </button>
         )}
-        onClick={onSelect ? (e) => onSelect(block.id, e.nativeEvent as unknown as React.MouseEvent) : undefined}
-      >
-        <div className="flex items-center gap-2">
-          {onSelect && (
-            <div
-              className={cn(
-                'flex items-center justify-center size-5 rounded border transition-colors flex-shrink-0',
-                isSelected
-                  ? 'bg-primary border-primary text-primary-foreground'
-                  : 'border-border/50 bg-background hover:border-primary/50'
-              )}
-              role="checkbox"
-              aria-checked={!!isSelected}
-              aria-label={`Select block ${block.id}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {isSelected && (
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              )}
-            </div>
-          )}
-          {block.character_id && (
-            <Badge variant="secondary" className="h-5 px-2 text-[10px] font-semibold bg-primary/15 text-primary border-0">
-              {block.character_id}
-            </Badge>
-          )}
-          <code className="text-[10px] text-muted-foreground font-mono">
-            {block.block_hash}
-          </code>
-          <span className="text-[10px] text-muted-foreground">
-            L{block.line_index}
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={cn('size-2.5 rounded-full', config.dot)} />
+            </TooltipTrigger>
+            <TooltipContent side="right"><p>{config.label}</p></TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <span className="text-[10px] text-muted-foreground font-mono">L{block.line_index}</span>
+        {block.character_id && (
+          <span className="max-w-full truncate rounded-sm bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary font-semibold">
+            {block.character_id}
           </span>
-          <span className="text-[10px] text-muted-foreground capitalize">
-            [{block.block_type}]
-          </span>
-        </div>
-        <Badge variant="outline" className={cn('h-5 px-2 text-[10px]', config.className)}>
-          {config.label}
-        </Badge>
+        )}
+        {block.status === 'warning' && <AlertTriangle className="size-3 text-warning" />}
+        {block.status === 'modified' && <GitBranch className="size-3 text-amber-500" />}
       </div>
 
-      {/* Card Body - Dual Pane */}
-      <div className="grid grid-cols-2 divide-x divide-border/50">
-        {/* Original Text */}
-        <div className="p-3">
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5 font-medium">
-            Original
-          </p>
-          <p className="text-sm text-muted-foreground leading-relaxed select-all font-mono">
-            {block.original_text}
-          </p>
+      <div className="min-w-0 flex-1 grid grid-cols-2 gap-3 px-3 py-2">
+        <div className="min-w-0 text-sm leading-5 text-foreground/80 font-mono whitespace-pre-wrap select-all">
+          {block.original_text}
         </div>
-
-        {/* Translated Text */}
-        <div className="p-3">
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5 font-medium">
-            Translation
-          </p>
-          <Textarea
-            key={textareaKey}
-            defaultValue={block.translated_text ?? ''}
-            onChange={handleTextChange}
-            placeholder="Enter translation..."
-            className="min-h-[60px] text-sm bg-input/50 border-border/50 focus:border-ring"
-          />
-        </div>
+        <textarea
+          key={textareaKey}
+          ref={handleInitialResize}
+          rows={1}
+          defaultValue={block.translated_text ?? ''}
+          onChange={handleTextChange}
+          placeholder="Translation"
+          className={cn(
+            'w-full min-h-[28px] overflow-hidden resize-none rounded border border-transparent bg-transparent px-2 py-1 text-sm leading-5 outline-none transition-colors',
+            'hover:border-border focus:border-primary focus:bg-background',
+            config.input
+          )}
+        />
       </div>
 
-      {/* Card Footer */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-border/50 bg-surface-elevated/30">
-        {/* Warning Message */}
-        <div className="flex items-center gap-1.5">
-          {block.status === 'warning' && (
-            <>
-              <AlertTriangle className="size-3 text-warning" />
-              <span className="text-[11px] text-warning">
-                Missing tags — sẽ fallback về bản gốc khi Export
-              </span>
-            </>
-          )}
-          {block.status === 'modified' && (
-            <>
-              <GitBranch className="size-3 text-amber-500" />
-              <span className="text-[11px] text-amber-500">
-                Source text changed in game update — review needed
-              </span>
-            </>
-          )}
-        </div>
+      <div className="w-[108px] flex-shrink-0 flex items-start justify-end gap-1 px-2 py-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                id={`btn-ai-translate-${block.id}`}
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-info hover:bg-info/10"
+                onClick={() => onAITranslate(block.id)}
+              >
+                <Sparkles className="size-3.5" />
+                <span className="sr-only">AI Translate</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>AI Translate</p></TooltipContent>
+          </Tooltip>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-1">
-          <TooltipProvider delayDuration={0}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  id={`btn-ai-translate-${block.id}`}
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 text-muted-foreground hover:text-info hover:bg-info/10"
-                  onClick={() => onAITranslate(block.id)}
-                >
-                  <Sparkles className="size-3.5" />
-                  <span className="sr-only">AI Translate</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top"><p>Dịch bằng AI</p></TooltipContent>
-            </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                id={`btn-revert-${block.id}`}
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                onClick={() => onRevert(block.id)}
+              >
+                <RotateCcw className="size-3.5" />
+                <span className="sr-only">Revert</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Revert</p></TooltipContent>
+          </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  id={`btn-revert-${block.id}`}
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  onClick={() => onRevert(block.id)}
-                >
-                  <RotateCcw className="size-3.5" />
-                  <span className="sr-only">Revert</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top"><p>Hoàn tác về rỗng</p></TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  id={`btn-approve-${block.id}`}
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-6 w-6 p-0',
-                    block.status === 'approved'
-                      ? 'text-success bg-success/10'
-                      : 'text-muted-foreground hover:text-success hover:bg-success/10'
-                  )}
-                  onClick={() => onApprove(block.id)}
-                  disabled={!block.translated_text?.trim()}
-                >
-                  <Check className="size-3.5" />
-                  <span className="sr-only">Approve</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top"><p>Duyệt bản dịch</p></TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                id={`btn-approve-${block.id}`}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  'h-7 w-7 p-0',
+                  block.status === 'approved'
+                    ? 'text-success bg-success/10'
+                    : 'text-muted-foreground hover:text-success hover:bg-success/10'
+                )}
+                onClick={() => onApprove(block.id)}
+                disabled={!block.translated_text?.trim()}
+              >
+                <Check className="size-3.5" />
+                <span className="sr-only">Approve</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Approve</p></TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
     </div>
   )

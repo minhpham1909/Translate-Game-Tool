@@ -215,9 +215,9 @@ export function importRpyToDatabase(parseResult: ParseResult): void {
     const stmtBlock = db.prepare(`
       INSERT INTO translation_blocks (
         file_id, block_hash, block_type, character_id,
-        original_text, translated_text, status, indentation, line_index
+        original_text, translated_text, status, indentation, line_index, translated_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     for (const block of blocks) {
@@ -230,7 +230,8 @@ export function importRpyToDatabase(parseResult: ParseResult): void {
         block.translated_text,
         block.status,
         block.indentation,
-        block.line_index
+        block.line_index,
+        block.translated_by ?? 'none'
       )
     }
 
@@ -352,9 +353,9 @@ export function importRpyToDatabaseDiff(parseResult: ParseResult, oldFileId: num
     const stmtInsertBlock = db.prepare(`
       INSERT INTO translation_blocks (
         file_id, block_hash, block_type, character_id,
-        original_text, translated_text, status, indentation, line_index
+        original_text, translated_text, status, indentation, line_index, translated_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     // 4. Process each new block
@@ -404,7 +405,8 @@ export function importRpyToDatabaseDiff(parseResult: ParseResult, oldFileId: num
           block.translated_text,
           block.status,
           block.indentation,
-          block.line_index
+          block.line_index,
+          block.translated_by ?? 'none'
         )
         newBlocks++
       }

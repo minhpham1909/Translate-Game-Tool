@@ -2,6 +2,7 @@ import fs from 'fs-extra'
 import path from 'path'
 import { parseRpyFile, importRpyToDatabase, importRpyToDatabaseDiff, type DiffSummary, type ParseResult } from '../parser/rpyParser'
 import { getDatabase, syncAllFilesProgress } from '../store/database'
+import { findGlobalTMExact } from '../store/globalDb'
 import { isAlreadyTranslated } from '../utils/langDetector'
 
 function applyDirtySourceHotfix(blocks: ParseResult['blocks']): number {
@@ -18,6 +19,24 @@ function applyDirtySourceHotfix(blocks: ParseResult['blocks']): number {
   }
 
   return approvedCount
+}
+
+function applyGlobalTMAutoFill(blocks: ParseResult['blocks']): number {
+  let filledCount = 0
+
+  for (const block of blocks) {
+    if (block.status !== 'empty') continue
+
+    const translatedText = findGlobalTMExact(block.original_text)
+    if (!translatedText) continue
+
+    block.status = 'approved'
+    block.translated_text = translatedText
+    block.translated_by = 'tm'
+    filledCount++
+  }
+
+  return filledCount
 }
 
 function recomputeFileRecordStats(parseResult: ParseResult): void {
@@ -83,6 +102,7 @@ function resetWorkspaceTables(): void {
  * @param sourceLanguage Ngôn ngữ nguồn (vd: english, hoặc 'None' cho file gốc)
  */
 export async function parseProject(gameFolderPath: string, sourceLanguage: string, _targetLanguage?: string): Promise<void> {
+  void _targetLanguage
   // Không cho phép parse với target = None (nếu gọi nhầm)
   if (sourceLanguage === 'None') {
     console.warn('[ParserService] Source = None, sẽ quét từ game/ thay vì tl/None/')
@@ -124,7 +144,8 @@ export async function parseProject(gameFolderPath: string, sourceLanguage: strin
       // Dirty Source Hotfix: auto-approve blocks already in target language.
       // During initial setup, project config isn't persisted yet, so use AppSettings.targetLanguage.
       const approvedCount = applyDirtySourceHotfix(parseResult.blocks)
-      if (approvedCount > 0) recomputeFileRecordStats(parseResult)
+      const tmFilledCount = applyGlobalTMAutoFill(parseResult.blocks)
+      if (approvedCount > 0 || tmFilledCount > 0) recomputeFileRecordStats(parseResult)
 
       // Import vào DB nếu file có dữ liệu (có blocks hoặc file rỗng thì tạo record rỗng)
       importRpyToDatabase(parseResult)
@@ -203,7 +224,8 @@ export async function parseProjectDiff(
       // Dirty Source Hotfix: when new version contains already-translated (target-language) text,
       // auto-approve it so it won't be sent to AI again.
       const approvedCount = applyDirtySourceHotfix(parseResult.blocks)
-      if (approvedCount > 0) recomputeFileRecordStats(parseResult)
+      const tmFilledCount = applyGlobalTMAutoFill(parseResult.blocks)
+      if (approvedCount > 0 || tmFilledCount > 0) recomputeFileRecordStats(parseResult)
 
       // Find the old file ID by relative path
       const oldFileId = oldFileIdMap.get(relativePath) ?? null

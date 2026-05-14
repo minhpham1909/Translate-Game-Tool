@@ -1,4 +1,4 @@
-import { getDatabase } from '../store/database'
+import { getGlobalDatabase } from '../store/globalDb'
 
 export interface GlossaryEntry {
   id?: number
@@ -13,7 +13,7 @@ export interface GlossaryEntry {
  * Lấy toàn bộ danh sách thuật ngữ
  */
 export function getAllGlossaries(): GlossaryEntry[] {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const stmt = db.prepare('SELECT * FROM glossaries ORDER BY created_at DESC')
   const rows = stmt.all() as Array<GlossaryEntry & { enabled?: number }>
   return rows.map((row) => ({
@@ -26,7 +26,7 @@ export function getAllGlossaries(): GlossaryEntry[] {
  * Thêm một thuật ngữ mới
  */
 export function addGlossary(entry: Omit<GlossaryEntry, 'id' | 'created_at'>): GlossaryEntry {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const enabled = entry.enabled !== false
   const stmt = db.prepare(`
     INSERT INTO glossaries (source_text, target_text, notes, enabled)
@@ -45,7 +45,7 @@ export function addGlossary(entry: Omit<GlossaryEntry, 'id' | 'created_at'>): Gl
  * Cập nhật thuật ngữ hiện có
  */
 export function updateGlossary(id: number, entry: Omit<GlossaryEntry, 'id' | 'created_at'>): void {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const enabled = entry.enabled !== false
   const stmt = db.prepare(`
     UPDATE glossaries
@@ -59,7 +59,7 @@ export function updateGlossary(id: number, entry: Omit<GlossaryEntry, 'id' | 'cr
  * Xoá một thuật ngữ
  */
 export function deleteGlossary(id: number): void {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const stmt = db.prepare('DELETE FROM glossaries WHERE id = ?')
   stmt.run(id)
 }
@@ -68,7 +68,7 @@ export function deleteGlossary(id: number): void {
  * Bật/tắt nhiều thuật ngữ cùng lúc
  */
 export function setGlossaryEnabled(ids: number[], enabled: boolean): void {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const uniqueIds = Array.from(new Set(ids)).filter((id) => Number.isFinite(id))
   if (uniqueIds.length === 0) return
 

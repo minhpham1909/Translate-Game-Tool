@@ -1,4 +1,4 @@
-import { getDatabase } from '../store/database'
+import { getGlobalDatabase, upsertGlobalTM } from '../store/globalDb'
 
 export interface TMEntry {
   id?: number
@@ -12,7 +12,7 @@ export interface TMEntry {
  * Lấy danh sách Translation Memory (giới hạn 1000 records mới nhất)
  */
 export function getTMEntries(): TMEntry[] {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const stmt = db.prepare('SELECT * FROM translation_memory ORDER BY last_used_at DESC LIMIT 1000')
   return stmt.all() as TMEntry[]
 }
@@ -21,7 +21,7 @@ export function getTMEntries(): TMEntry[] {
  * Xóa một entry TM
  */
 export function deleteTMEntry(id: number): void {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const stmt = db.prepare('DELETE FROM translation_memory WHERE id = ?')
   stmt.run(id)
 }
@@ -30,7 +30,7 @@ export function deleteTMEntry(id: number): void {
  * Xóa tất cả các entry có usage_count = 0 hoặc 1 (tùy logic unused)
  */
 export function clearUnusedTM(): void {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   // Trong DB default là 1 khi insert, nên ta clear các record ít dùng nếu cần
   // Hoặc logic cụ thể: chưa từng được match (usage_count <= 1)
   const stmt = db.prepare('DELETE FROM translation_memory WHERE usage_count <= 1')
@@ -41,7 +41,7 @@ export function clearUnusedTM(): void {
  * Tìm kiếm fuzzy (LIKE) trong TM - Dùng cho AI auto-fill
  */
 export function searchTM(query: string): TMEntry[] {
-  const db = getDatabase()
+  const db = getGlobalDatabase()
   const stmt = db.prepare('SELECT * FROM translation_memory WHERE original_text LIKE ? LIMIT 5')
   return stmt.all(`%${query}%`) as TMEntry[]
 }
@@ -51,14 +51,5 @@ export function searchTM(query: string): TMEntry[] {
  * Gọi khi AI dịch thành công một block
  */
 export function upsertTM(originalText: string, translatedText: string): void {
-  const db = getDatabase()
-  const stmt = db.prepare(`
-    INSERT INTO translation_memory (original_text, translated_text, usage_count, last_used_at)
-    VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-    ON CONFLICT(original_text) DO UPDATE SET
-      translated_text = excluded.translated_text,
-      usage_count = usage_count + 1,
-      last_used_at = CURRENT_TIMESTAMP
-  `)
-  stmt.run(originalText, translatedText)
+  upsertGlobalTM(originalText, translatedText)
 }

@@ -3,14 +3,14 @@ import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProje
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGlossaryEnabled } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
-import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation } from './services/workspaceService'
+import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation, batchApproveBlocks } from './services/workspaceService'
 import { preFlightAnalyzer, startQueue, stopQueue, translateBatchByBlockIds } from './services/translationEngine'
 import { parseProjectDiff, previewDiff } from './services/parserService'
 import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
-import { getDatabase, rebuildFtsTable } from './store/database'
+import { rebuildFtsTable } from './store/database'
 import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
-import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, listBackups, restoreFileBackup } from './services/exportService'
+import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, restoreFileToOriginal } from './services/exportService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -170,21 +170,14 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('workspace:batchApprove', async (_, blockIds: number[]) => {
-    const db = getDatabase()
-    const stmt = db.prepare(`UPDATE translation_blocks SET status = 'approved' WHERE id = ?`)
-    const updateMany = db.transaction((ids: number[]) => {
-      for (const id of ids) {
-        stmt.run(id)
-      }
-    })
     try {
-      updateMany(blockIds)
+      batchApproveBlocks(blockIds)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes('SQLITE_CORRUPT') || message.includes('database disk image is malformed')) {
         console.warn('[IPC] FTS corruption detected, rebuilding and retrying...')
         rebuildFtsTable()
-        updateMany(blockIds)
+        batchApproveBlocks(blockIds)
       } else {
         throw err
       }
@@ -231,11 +224,7 @@ export function registerIpcHandlers(): void {
     return await exportSelectedFiles(fileIds, approvedOnly)
   })
 
-  ipcMain.handle('export:listBackups', async () => {
-    return await listBackups()
-  })
-
-  ipcMain.handle('export:restoreBackup', async (_, fileId: number, backupPath: string) => {
-    await restoreFileBackup(fileId, backupPath)
+  ipcMain.handle('export:restoreOriginal', async (_, fileId: number) => {
+    await restoreFileToOriginal(fileId)
   })
 }

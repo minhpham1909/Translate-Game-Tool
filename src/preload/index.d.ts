@@ -106,15 +106,6 @@ export interface DiffSummary {
   totalFiles: number
 }
 
-export interface BackupEntry {
-  fileId: number
-  fileName: string
-  filePath: string
-  backupPath: string
-  createdAt: string
-  fileSize: number
-}
-
 export interface ExportResult {
   exportedFiles: number
   totalFiles: number
@@ -202,8 +193,7 @@ declare global {
         getFilesWithChanges: () => Promise<ExportFileEntry[]>
         exportAll: (approvedOnly: boolean) => Promise<ExportResult>
         exportSelected: (fileIds: number[], approvedOnly: boolean) => Promise<ExportResult>
-        listBackups: () => Promise<BackupEntry[]>
-        restoreBackup: (fileId: number, backupPath: string) => Promise<void>
+        restoreOriginal: (fileId: number) => Promise<void>
       }
     }
   }
