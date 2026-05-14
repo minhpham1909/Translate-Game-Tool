@@ -224,6 +224,14 @@ export function registerIpcHandlers(): void {
     return await exportSelectedFiles(fileIds, approvedOnly)
   })
 
+  ipcMain.handle('export:listBackups', async () => {
+    return await listBackups()
+  })
+
+  ipcMain.handle('export:restoreBackup', async (_, fileId: number, backupPath: string) => {
+    await restoreFileBackup(fileId, backupPath)
+  })
+
   ipcMain.handle('export:restoreOriginal', async (_, fileId: number) => {
     await restoreFileToOriginal(fileId)
   })

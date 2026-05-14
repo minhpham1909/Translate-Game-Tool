@@ -115,8 +115,8 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
                         Restore
                       </Button>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </ScrollArea>
           )}

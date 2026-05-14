@@ -338,25 +338,6 @@ export async function restoreFileBackup(fileId: number, backupFilePath: string):
   await restoreFileToOriginal(fileId)
 }
 
-export async function restoreFileToOriginal(fileId: number): Promise<void> {
-  const db = getDatabase()
-
-  const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
-  if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
-
-  db.prepare(`
-    UPDATE translation_blocks
-    SET translated_text = NULL, status = 'empty'
-    WHERE file_id = ?
-  `).run(fileId)
-
-  syncAllFilesProgress()
-  await exportFile(fileId, false)
-  syncAllFilesProgress()
-
-  console.log(`[Restore] Restored ${fileRecord.file_name} via DB reset`)
-}
-
 /**
  * Database-Driven Restore: xoá translations trong DB rồi re-export.
  * Không cần physical backup — dùng original_text từ DB để khôi phục.
@@ -364,7 +345,8 @@ export async function restoreFileToOriginal(fileId: number): Promise<void> {
  */
 export async function restoreFileToOriginal(fileId: number): Promise<void> {
   const db = getDatabase()
-  if (!db) throw new Error('Database not initialized')
+  const fileRecord = db.prepare(`SELECT * FROM files WHERE id = ?`).get(fileId) as FileRecord
+  if (!fileRecord) throw new Error(`File not found for ID: ${fileId}`)
 
   // STEP 1: Wipe all translations for this file (giữ original_text)
   db.prepare(`
@@ -377,8 +359,11 @@ export async function restoreFileToOriginal(fileId: number): Promise<void> {
   syncAllFilesProgress()
 
   // STEP 3: Re-export — translated_text = NULL → exportFile dùng original_text
-  await exportFile(fileId)
-  console.log(`[Restore] Successfully restored fileId ${fileId} via DB reset + re-export`)
+  await exportFile(fileId, false)
+
+  // STEP 4: Sync UI progress after export
+  syncAllFilesProgress()
+  console.log(`[Restore] Successfully restored ${fileRecord.file_name} (fileId ${fileId}) via DB reset + re-export`)
 }
 
 /**

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { AppSettings, ProjectConfig, RecentProject, ExportFileEntry } from '../shared/types'
+import type { AppSettings, ProjectConfig, RecentProject, ExportFileEntry, BackupEntry } from '../shared/types'
 
 type BlockStatus = 'empty' | 'draft' | 'approved' | 'warning' | 'skipped' | 'modified'
 
