@@ -193,7 +193,9 @@ declare global {
         getFilesWithChanges: () => Promise<ExportFileEntry[]>
         exportAll: (approvedOnly: boolean) => Promise<ExportResult>
         exportSelected: (fileIds: number[], approvedOnly: boolean) => Promise<ExportResult>
-        restoreOriginal: (fileId: number) => Promise<void>
+        listBackups: () => Promise<BackupEntry[]>
+        restoreBackup: (fileId: number, backupPath: string) => Promise<void>
+        restoreToOriginal: (fileId: number) => Promise<void>
       }
     }
   }

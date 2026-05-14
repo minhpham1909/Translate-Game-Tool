@@ -179,7 +179,9 @@ interface RendererApi {
     getFilesWithChanges: () => Promise<ExportFileEntry[]>
     exportAll: (approvedOnly: boolean) => Promise<ExportResult>
     exportSelected: (fileIds: number[], approvedOnly: boolean) => Promise<ExportResult>
-    restoreOriginal: (fileId: number) => Promise<void>
+    listBackups: () => Promise<BackupEntry[]>
+    restoreBackup: (fileId: number, backupPath: string) => Promise<void>
+    restoreToOriginal: (fileId: number) => Promise<void>
   }
 }
 
@@ -275,7 +277,9 @@ const api: RendererApi = {
     getFilesWithChanges: () => ipcRenderer.invoke('export:getFilesWithChanges') as Promise<ExportFileEntry[]>,
     exportAll: (approvedOnly: boolean) => ipcRenderer.invoke('export:exportAll', approvedOnly) as Promise<ExportResult>,
     exportSelected: (fileIds: number[], approvedOnly: boolean) => ipcRenderer.invoke('export:exportSelected', fileIds, approvedOnly) as Promise<ExportResult>,
-    restoreOriginal: (fileId: number) => ipcRenderer.invoke('export:restoreOriginal', fileId) as Promise<void>
+    listBackups: () => ipcRenderer.invoke('export:listBackups') as Promise<BackupEntry[]>,
+     restoreBackup: (fileId: number, backupPath: string) => ipcRenderer.invoke('export:restoreBackup', fileId, backupPath) as Promise<void>,
+     restoreToOriginal: (fileId: number) => ipcRenderer.invoke('export:restoreToOriginal', fileId) as Promise<void>
    }
 }
 

@@ -10,7 +10,7 @@ import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
 import { rebuildFtsTable } from './store/database'
 import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
-import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, restoreFileToOriginal } from './services/exportService'
+import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, listBackups, restoreFileBackup, restoreFileToOriginal } from './services/exportService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -225,6 +225,10 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('export:restoreOriginal', async (_, fileId: number) => {
+    await restoreFileToOriginal(fileId)
+  })
+
+  ipcMain.handle('export:restoreToOriginal', async (_, fileId: number) => {
     await restoreFileToOriginal(fileId)
   })
 }
