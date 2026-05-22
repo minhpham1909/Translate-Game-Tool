@@ -8,6 +8,19 @@ export interface SystemLogEntry {
   timestamp: string
 }
 
+export interface EngineProgressPayload {
+  success: number
+  error: number
+  state?: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+  fileId?: number | null
+  processed?: number
+  speedBlocksPerMin?: number
+  etaSeconds?: number | null
+  batchSize?: number
+  approxInputTokens?: number
+  approxOutputTokens?: number
+}
+
 function getTimestamp(): string {
   // HH:mm:ss (24h)
   return new Date().toLocaleTimeString('en-GB', { hour12: false })
@@ -25,6 +38,6 @@ export function emitSystemLog(type: SystemLogType, message: string): void {
   broadcastToAllWindows<SystemLogEntry>('system:log', entry)
 }
 
-export function emitEngineProgress(progress: { success: number; error: number }): void {
+export function emitEngineProgress(progress: EngineProgressPayload): void {
   broadcastToAllWindows('engine:progress', progress)
 }

@@ -4,7 +4,7 @@
  * Terminal có thể mở/đóng, hiển thị log real-time từ Backend (qua IPC ở Step 3).
  */
 import { useState } from 'react'
-import { Terminal, ChevronUp, ChevronDown, Circle } from 'lucide-react'
+import { Terminal, ChevronUp, ChevronDown, Circle, Pause, Play, Square } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { cn } from '@renderer/lib/utils'
@@ -23,6 +23,15 @@ interface BottomBarProps {
   apiCost: number
   logs: LogEntry[]
   isConnected?: boolean
+  queueState?: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+  queueSpeedBlocksPerMin?: number
+  queueEtaSeconds?: number | null
+  queueProcessed?: number
+  queueApproxInputTokens?: number
+  queueApproxOutputTokens?: number
+  onQueuePause?: () => void
+  onQueueResume?: () => void
+  onQueueStop?: () => void
 }
 
 const logTypeStyles: Record<LogType, string> = {
@@ -40,9 +49,28 @@ const logTypeStyles: Record<LogType, string> = {
  * @param logs - Mảng log entries từ Backend
  * @param isConnected - Trạng thái kết nối với Main process
  */
-export function BottomBar({ totalBlocks, translatedBlocks, apiCost, logs, isConnected = true }: BottomBarProps) {
+export function BottomBar({
+  totalBlocks,
+  translatedBlocks,
+  apiCost,
+  logs,
+  isConnected = true,
+  queueState = 'idle',
+  queueSpeedBlocksPerMin,
+  queueEtaSeconds,
+  queueProcessed,
+  queueApproxInputTokens,
+  queueApproxOutputTokens,
+  onQueuePause,
+  onQueueResume,
+  onQueueStop,
+}: BottomBarProps) {
   const [isTerminalOpen, setIsTerminalOpen] = useState(false)
   const progress = totalBlocks > 0 ? Math.round((translatedBlocks / totalBlocks) * 100) : 0
+  const canPause = queueState === 'running'
+  const canResume = queueState === 'paused' || queueState === 'stopped' || queueState === 'error'
+  const canStop = queueState === 'running' || queueState === 'paused'
+  const etaLabel = queueEtaSeconds == null ? '--' : `${Math.max(0, queueEtaSeconds)}s`
 
   return (
     <div className="flex-shrink-0 border-t border-border bg-card">
@@ -110,6 +138,59 @@ export function BottomBar({ totalBlocks, translatedBlocks, apiCost, logs, isConn
           <div className="flex items-center gap-1.5">
             <span className="text-muted-foreground">API Cost:</span>
             <span className="font-medium text-warning">${apiCost.toFixed(4)}</span>
+          </div>
+
+          <div className="h-3 w-px bg-border" />
+
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">Queue:</span>
+            <span className="font-medium text-foreground">{queueState.toUpperCase()}</span>
+            <span className="text-muted-foreground">ETA {etaLabel}</span>
+            {typeof queueSpeedBlocksPerMin === 'number' && (
+              <span className="text-muted-foreground">{queueSpeedBlocksPerMin.toFixed(1)} blk/min</span>
+            )}
+            {typeof queueProcessed === 'number' && (
+              <span className="text-muted-foreground">done {queueProcessed}</span>
+            )}
+            {typeof queueApproxInputTokens === 'number' && (
+              <span className="text-muted-foreground">inTok {queueApproxInputTokens}</span>
+            )}
+            {typeof queueApproxOutputTokens === 'number' && (
+              <span className="text-muted-foreground">outTok {queueApproxOutputTokens}</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              id="btn-queue-pause"
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 gap-1 text-[11px]"
+              onClick={onQueuePause}
+              disabled={!canPause || !onQueuePause}
+            >
+              <Pause className="size-3" />
+            </Button>
+            <Button
+              id="btn-queue-resume"
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 gap-1 text-[11px]"
+              onClick={onQueueResume}
+              disabled={!canResume || !onQueueResume}
+            >
+              <Play className="size-3" />
+            </Button>
+            <Button
+              id="btn-queue-stop"
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 gap-1 text-[11px]"
+              onClick={onQueueStop}
+              disabled={!canStop || !onQueueStop}
+            >
+              <Square className="size-3" />
+            </Button>
           </div>
 
           <div className="h-3 w-px bg-border" />

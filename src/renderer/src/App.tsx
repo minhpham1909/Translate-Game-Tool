@@ -31,6 +31,17 @@ import type { RecentProject } from '../../shared/types'
 
 const MAX_LOGS = 200
 
+interface QueueRuntimeState {
+  state: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+  fileId: number | null
+  processed: number
+  speedBlocksPerMin?: number
+  etaSeconds?: number | null
+  approxInputTokens?: number
+  approxOutputTokens?: number
+  errorCount: number
+}
+
 function normalizeLogType(type: unknown): LogType {
   switch (type) {
     case 'info':
@@ -93,7 +104,21 @@ function CATWorkspace({
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [preflightData, setPreflightData] = useState({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
   const [glossaryEntries, setGlossaryEntries] = useState<GlossaryModalEntry[]>([])
+  const [tmEntries, setTmEntries] = useState<Array<{
+    id: number
+    original_text: string
+    translated_text: string
+    usage_count: number
+    last_used_at: string
+  }>>([])
   const [gameFolderPath, setGameFolderPath] = useState<string>('')
+  const [queueRuntime, setQueueRuntime] = useState<QueueRuntimeState>({
+    state: 'idle',
+    fileId: null,
+    processed: 0,
+    etaSeconds: null,
+    errorCount: 0,
+  })
   const activeFileIdRef = useRef<number | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notify = useNotification()
@@ -185,7 +210,18 @@ function CATWorkspace({
       })
     })
 
-    const unsubscribeProgress = window.api.events.onEngineProgress(() => {
+    const unsubscribeProgress = window.api.events.onEngineProgress((progress) => {
+      setQueueRuntime((prev) => ({
+        ...prev,
+        state: progress.state ?? prev.state,
+        fileId: progress.fileId ?? prev.fileId,
+        processed: progress.processed ?? prev.processed,
+        speedBlocksPerMin: progress.speedBlocksPerMin ?? prev.speedBlocksPerMin,
+        etaSeconds: progress.etaSeconds ?? prev.etaSeconds,
+        approxInputTokens: progress.approxInputTokens ?? prev.approxInputTokens,
+        approxOutputTokens: progress.approxOutputTokens ?? prev.approxOutputTokens,
+        errorCount: progress.error,
+      }))
       // Debounce refresh; queue can emit often.
       if (refreshTimerRef.current) return
       refreshTimerRef.current = setTimeout(() => {
@@ -199,6 +235,33 @@ function CATWorkspace({
     return () => {
       unsubscribeLog()
       unsubscribeProgress()
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const syncQueueStatus = async (): Promise<void> => {
+      try {
+        const status = await window.api.engine.getQueueStatus()
+        if (cancelled) return
+        setQueueRuntime((prev) => ({
+          ...prev,
+          state: status.state,
+          fileId: status.fileId,
+          processed: status.processedCount + status.errorCount,
+          errorCount: status.errorCount,
+        }))
+      } catch (err) {
+        console.error('Failed to sync queue status:', err)
+      }
+    }
+    void syncQueueStatus()
+    const timer = setInterval(() => {
+      void syncQueueStatus()
+    }, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
     }
   }, [])
 
@@ -302,6 +365,31 @@ function CATWorkspace({
     })()
   }
 
+  const handleQueuePause = (): void => {
+    void window.api.engine.pauseQueue().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      notify.error('Pause Queue Failed', message)
+    })
+  }
+
+  const handleQueueResume = (): void => {
+    void window.api.engine.resumeQueue().then((result) => {
+      if (!result.resumed && !result.alreadyRunning) {
+        notify.error('Resume Queue', 'No paused queue checkpoint found.')
+      }
+    }).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      notify.error('Resume Queue Failed', message)
+    })
+  }
+
+  const handleQueueStop = (): void => {
+    void window.api.engine.stopQueue().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      notify.error('Stop Queue Failed', message)
+    })
+  }
+
   // Load preflight data when modal opens or scope changes
   useEffect(() => {
     if (!modals.preflight) return
@@ -339,6 +427,33 @@ function CATWorkspace({
     })()
     return () => { cancelled = true }
   }, [modals.glossary])
+
+  useEffect(() => {
+    if (!modals.tmManager) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const raw = await window.api.tm.getAll()
+        if (!cancelled) {
+          setTmEntries(
+            raw
+              .filter((entry): entry is { id: number; original_text: string; translated_text: string; usage_count: number; last_used_at?: string } => typeof entry.id === 'number')
+              .map((entry) => ({
+                id: entry.id,
+                original_text: entry.original_text,
+                translated_text: entry.translated_text,
+                usage_count: entry.usage_count,
+                last_used_at: entry.last_used_at ?? '',
+              }))
+          )
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (!cancelled) notify.error('TM load failed', message)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [modals.tmManager])
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -429,6 +544,15 @@ function CATWorkspace({
         apiCost={0.0012}
         logs={logs}
         isConnected={true}
+        queueState={queueRuntime.state}
+        queueSpeedBlocksPerMin={queueRuntime.speedBlocksPerMin}
+        queueEtaSeconds={queueRuntime.etaSeconds}
+        queueProcessed={queueRuntime.processed}
+        queueApproxInputTokens={queueRuntime.approxInputTokens}
+        queueApproxOutputTokens={queueRuntime.approxOutputTokens}
+        onQueuePause={handleQueuePause}
+        onQueueResume={handleQueueResume}
+        onQueueStop={handleQueueStop}
       />
 
       {/* All Modals */}
@@ -472,10 +596,118 @@ function CATWorkspace({
       <TMManagerModal
         open={modals.tmManager}
         onOpenChange={(o) => setModals((p) => ({ ...p, tmManager: o }))}
-        entries={[]}
-        onDelete={(id) => console.log('[TODO] Delete TM:', id)}
-        onClearUnused={() => console.log('[TODO] Clear unused TM')}
-        onRefresh={() => console.log('[TODO] Refresh TM')}
+        entries={tmEntries}
+        onDelete={(id) => {
+          void (async () => {
+            try {
+              await window.api.tm.delete(id)
+              const raw = await window.api.tm.getAll()
+              setTmEntries(
+                raw
+                  .filter((entry): entry is { id: number; original_text: string; translated_text: string; usage_count: number; last_used_at?: string } => typeof entry.id === 'number')
+                  .map((entry) => ({
+                    id: entry.id,
+                    original_text: entry.original_text,
+                    translated_text: entry.translated_text,
+                    usage_count: entry.usage_count,
+                    last_used_at: entry.last_used_at ?? '',
+                  }))
+              )
+              notify.success('TM updated', 'Entry deleted')
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('TM delete failed', message)
+            }
+          })()
+        }}
+        onClearUnused={() => {
+          if (!window.confirm('Clear TM entries with usage <= 1? A snapshot will be created automatically.')) return
+          void (async () => {
+            try {
+              await window.api.globalData.clear({ scope: 'tm', mode: 'unused' })
+              const raw = await window.api.tm.getAll()
+              setTmEntries(
+                raw
+                  .filter((entry): entry is { id: number; original_text: string; translated_text: string; usage_count: number; last_used_at?: string } => typeof entry.id === 'number')
+                  .map((entry) => ({
+                    id: entry.id,
+                    original_text: entry.original_text,
+                    translated_text: entry.translated_text,
+                    usage_count: entry.usage_count,
+                    last_used_at: entry.last_used_at ?? '',
+                  }))
+              )
+              notify.success('TM cleanup complete', 'Unused entries cleared')
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('TM cleanup failed', message)
+            }
+          })()
+        }}
+        onClearAll={() => {
+          const step1 = window.confirm('This will clear ALL TM entries and create a snapshot. Continue?')
+          if (!step1) return
+          const confirmText = window.prompt('Type CLEAR to confirm:')
+          if (confirmText !== 'CLEAR') return
+          void (async () => {
+            try {
+              await window.api.globalData.clear({ scope: 'tm', mode: 'all' })
+              setTmEntries([])
+              notify.success('TM cleared', 'All TM entries were removed')
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('TM clear failed', message)
+            }
+          })()
+        }}
+        onRestoreLatest={() => {
+          void (async () => {
+            try {
+              const result = await window.api.globalData.restoreLatestSnapshot()
+              if (!result.restored) {
+                notify.error('Restore failed', 'No snapshot found')
+                return
+              }
+              const raw = await window.api.tm.getAll()
+              setTmEntries(
+                raw
+                  .filter((entry): entry is { id: number; original_text: string; translated_text: string; usage_count: number; last_used_at?: string } => typeof entry.id === 'number')
+                  .map((entry) => ({
+                    id: entry.id,
+                    original_text: entry.original_text,
+                    translated_text: entry.translated_text,
+                    usage_count: entry.usage_count,
+                    last_used_at: entry.last_used_at ?? '',
+                  }))
+              )
+              notify.success('Restore complete', 'Global DB restored from latest snapshot')
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('Restore failed', message)
+            }
+          })()
+        }}
+        onRefresh={() => {
+          void (async () => {
+            try {
+              const raw = await window.api.tm.getAll()
+              setTmEntries(
+                raw
+                  .filter((entry): entry is { id: number; original_text: string; translated_text: string; usage_count: number; last_used_at?: string } => typeof entry.id === 'number')
+                  .map((entry) => ({
+                    id: entry.id,
+                    original_text: entry.original_text,
+                    translated_text: entry.translated_text,
+                    usage_count: entry.usage_count,
+                    last_used_at: entry.last_used_at ?? '',
+                  }))
+              )
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('TM refresh failed', message)
+            }
+          })()
+        }}
       />
 
       <GlossaryModal

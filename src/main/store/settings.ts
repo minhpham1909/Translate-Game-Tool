@@ -81,6 +81,13 @@ const defaultSettings: AppSettings = {
 
   // Group 10
   customDbFolder: '',
+
+  // Group 11
+  enableTokenOptimizer: true,
+  tokenTargetInputTokens: 2800,
+
+  // Group 12
+  exportMode: 'vortex_like',
 }
 
 /**

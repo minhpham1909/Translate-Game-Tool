@@ -69,6 +69,14 @@ export interface SystemLogEntry {
 export interface EngineProgress {
   success: number
   error: number
+  state?: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+  fileId?: number | null
+  processed?: number
+  speedBlocksPerMin?: number
+  etaSeconds?: number | null
+  batchSize?: number
+  approxInputTokens?: number
+  approxOutputTokens?: number
 }
 
 export interface CompiledScanResult {
@@ -111,6 +119,7 @@ export interface ExportResult {
   totalFiles: number
   skippedFiles: number
   errors: string[]
+  warnings?: string[]
 }
 
 export interface ExportFileEntry {
@@ -121,6 +130,15 @@ export interface ExportFileEntry {
   translatedBlocks: number
   status: 'pending' | 'in_progress' | 'completed'
   hasChanges: boolean
+}
+
+export interface BackupEntry {
+  fileId: number
+  fileName: string
+  filePath: string
+  backupPath: string
+  createdAt: string
+  fileSize: number
 }
 
 declare global {
@@ -159,6 +177,12 @@ declare global {
         clearUnused: () => Promise<void>
         search: (query: string) => Promise<TMEntry[]>
       }
+      globalData: {
+        createSnapshot: () => Promise<string>
+        listSnapshots: () => Promise<string[]>
+        restoreLatestSnapshot: () => Promise<{ restored: boolean; snapshotPath: string | null }>
+        clear: (options: { scope: 'tm' | 'glossary' | 'all'; mode: 'all' | 'unused' | 'older_than_days'; olderThanDays?: number }) => Promise<{ deletedRows: number; snapshotPath: string }>
+      }
       search: {
         searchBlocks: (query: string, options: SearchOptions) => Promise<SearchMatch[]>
         replaceBlockText: (blockId: number, newText: string, isOriginal: boolean) => Promise<void>
@@ -174,7 +198,18 @@ declare global {
         preflight: (fileId?: number) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
         translateBatch: (blockIds: number[]) => Promise<void>
         startQueue: (options?: { fileId?: number }) => Promise<{ started: boolean; alreadyRunning: boolean }>
+        pauseQueue: () => Promise<{ paused: boolean }>
+        resumeQueue: () => Promise<{ resumed: boolean; alreadyRunning: boolean }>
         stopQueue: () => Promise<{ stopped: boolean }>
+        getQueueStatus: () => Promise<{
+          state: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+          running: boolean
+          fileId: number | null
+          processedCount: number
+          errorCount: number
+          lastBlockId: number | null
+          updatedAt: string | null
+        }>
       }
 
       events: {

@@ -5,11 +5,19 @@ import { TranslationBlock } from '../../shared/types'
 import { getSettings, getActiveProviderConfig } from '../store/settings'
 import { validateTranslation, validateGlossary, validateLengthOverflow, type GlossaryTerm } from '../utils/qaLinter'
 import { emitEngineProgress, emitSystemLog } from '../utils/ipcBroadcast'
+import type { EngineProgressPayload } from '../utils/ipcBroadcast'
 import { RateLimitError, TokenLimitError, ParsingError, APIError, normalizeError } from '../api/errors'
 import { filterBlacklist } from '../utils/regexBlacklist'
 import { filterSmartGlossary, formatGlossaryForPrompt } from '../utils/smartGlossary'
 import { shouldRetry, categorizeErrors } from '../utils/selfCorrection'
 import { isAlreadyTranslated } from '../utils/langDetector'
+import {
+  estimateBatchTokens,
+  estimateThroughputPerMinute,
+  estimateEtaSeconds,
+  getDefaultTokenBudget,
+  planBatchSize,
+} from '../utils/tokenOptimizer'
 
 type Db = ReturnType<typeof getDatabase>
 
@@ -128,6 +136,147 @@ function getProviderName(): string {
     case 'claude': return 'claude'
     case 'openai_compatible': return 'openai_compatible'
     default: return providerId
+  }
+}
+
+type QueueState = 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+
+interface QueueCheckpointRow {
+  file_id: number | null
+  last_block_id: number | null
+  queue_state: QueueState
+  queue_config_json: string | null
+  processed_count: number
+  error_count: number
+  updated_at?: string
+}
+
+interface TokenTelemetryRowInput {
+  fileId?: number | null
+  requestKind: 'queue_batch' | 'manual_batch'
+  batchSize: number
+  inputTokens: number
+  outputTokens: number
+  inputChars: number
+  outputChars: number
+  durationMs: number
+  status: 'ok' | 'error'
+  errorType?: string | null
+}
+
+function getActiveModelId(): string {
+  const { config } = getActiveProviderConfig()
+  return (config.modelId || '').trim()
+}
+
+function writeTokenTelemetry(input: TokenTelemetryRowInput): void {
+  const db = getDatabase()
+  const { providerId } = getActiveProviderConfig()
+  const modelId = getActiveModelId()
+  db.prepare(`
+    INSERT INTO token_telemetry (
+      file_id, provider_id, model_id, request_kind, batch_size,
+      input_tokens, output_tokens, input_chars, output_chars,
+      duration_ms, status, error_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.fileId ?? null,
+    providerId,
+    modelId || null,
+    input.requestKind,
+    input.batchSize,
+    input.inputTokens,
+    input.outputTokens,
+    input.inputChars,
+    input.outputChars,
+    input.durationMs,
+    input.status,
+    input.errorType ?? null
+  )
+}
+
+function saveQueueCheckpoint(checkpoint: {
+  fileId?: number | null
+  lastBlockId?: number | null
+  state: QueueState
+  queueConfig?: Record<string, unknown>
+  processedCount: number
+  errorCount: number
+}): void {
+  const db = getDatabase()
+  db.prepare(`
+    INSERT INTO queue_checkpoints (
+      id, file_id, last_block_id, queue_state, queue_config_json, processed_count, error_count, updated_at
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      file_id = excluded.file_id,
+      last_block_id = excluded.last_block_id,
+      queue_state = excluded.queue_state,
+      queue_config_json = excluded.queue_config_json,
+      processed_count = excluded.processed_count,
+      error_count = excluded.error_count,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    checkpoint.fileId ?? null,
+    checkpoint.lastBlockId ?? null,
+    checkpoint.state,
+    checkpoint.queueConfig ? JSON.stringify(checkpoint.queueConfig) : null,
+    checkpoint.processedCount,
+    checkpoint.errorCount
+  )
+}
+
+function readQueueCheckpoint(): QueueCheckpointRow | null {
+  const db = getDatabase()
+  const row = db.prepare(`
+    SELECT file_id, last_block_id, queue_state, queue_config_json, processed_count, error_count, updated_at
+    FROM queue_checkpoints
+    WHERE id = 1
+  `).get() as QueueCheckpointRow | undefined
+  return row ?? null
+}
+
+function emitQueueProgress(progress: EngineProgressPayload): void {
+  emitEngineProgress(progress)
+}
+
+function getQueueRetryDelay(error: unknown, attempts: number, effectiveBatchSize: number): {
+  waitMs: number
+  nextBatchSize: number
+  shouldStop: boolean
+} {
+  if (error instanceof RateLimitError) {
+    const waitMs = error.retryAfterMs || Math.min(6000, Math.pow(2, attempts) * 500)
+    return { waitMs, nextBatchSize: effectiveBatchSize, shouldStop: false }
+  }
+
+  if (error instanceof TokenLimitError) {
+    return { waitMs: 800, nextBatchSize: Math.max(1, Math.floor(effectiveBatchSize / 2)), shouldStop: false }
+  }
+
+  if (error instanceof ParsingError) {
+    return { waitMs: 500, nextBatchSize: effectiveBatchSize, shouldStop: false }
+  }
+
+  if (error instanceof APIError && error.statusCode === 401) {
+    return { waitMs: 0, nextBatchSize: effectiveBatchSize, shouldStop: true }
+  }
+
+  return { waitMs: 0, nextBatchSize: effectiveBatchSize, shouldStop: true }
+}
+
+function resolveQueueConfig(raw: string | null): { fileId: number | null; batchSize?: number; enableTokenOptimizer?: boolean; tokenBudget?: number } | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      fileId: typeof parsed.fileId === 'number' ? parsed.fileId : null,
+      batchSize: typeof parsed.batchSize === 'number' ? parsed.batchSize : undefined,
+      enableTokenOptimizer: typeof parsed.enableTokenOptimizer === 'boolean' ? parsed.enableTokenOptimizer : undefined,
+      tokenBudget: typeof parsed.tokenBudget === 'number' ? parsed.tokenBudget : undefined,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -268,6 +417,8 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
   if (textsToTranslate.length > 0) {
     const enableSmartGlossary = settings.enableSmartGlossary !== false
     const glossaryText = buildSmartGlossary(db, textsToTranslate, enableSmartGlossary)
+    const inputChars = textsToTranslate.reduce((sum, text) => sum + text.length, 0)
+    const estimated = estimateBatchTokens(textsToTranslate)
 
     // Context Windowing: fetch previous translated blocks as conversation context
     const contextWindowSize = settings.contextWindowSize || 0
@@ -283,11 +434,36 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
     }
 
     let translatedTexts: string[]
+    const requestStartedAt = Date.now()
     try {
       translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText, contextHistory)
+      const outputChars = translatedTexts.reduce((sum, text) => sum + text.length, 0)
+      writeTokenTelemetry({
+        fileId: fileId || null,
+        requestKind: 'manual_batch',
+        batchSize: textsToTranslate.length,
+        inputTokens: estimated.inputTokens,
+        outputTokens: estimated.outputTokens,
+        inputChars,
+        outputChars,
+        durationMs: Date.now() - requestStartedAt,
+        status: 'ok',
+      })
     } catch (err) {
       const normalized = normalizeError(err)
       const message = normalized.message
+      writeTokenTelemetry({
+        fileId: fileId || null,
+        requestKind: 'manual_batch',
+        batchSize: textsToTranslate.length,
+        inputTokens: estimated.inputTokens,
+        outputTokens: 0,
+        inputChars,
+        outputChars: 0,
+        durationMs: Date.now() - requestStartedAt,
+        status: 'error',
+        errorType: normalized.name,
+      })
       console.error(`[AI] Translation failed:`, message)
       emitSystemLog('error', `[AI] Translation failed: ${message}`)
       throw normalized
@@ -468,45 +644,135 @@ export async function startBackgroundQueue(
   const db = getDatabase()
   const settings = getSettings()
   const batchSize = settings.batchSize || 20
+  const { providerId } = getActiveProviderConfig()
+  const enableTokenOptimizer = settings.enableTokenOptimizer !== false
+  const tokenBudget = settings.tokenTargetInputTokens > 0
+    ? settings.tokenTargetInputTokens
+    : getDefaultTokenBudget(providerId)
+  const checkpointBeforeStart = readQueueCheckpoint()
+  const checkpointMatchesScope = (checkpointBeforeStart?.file_id ?? null) === (options?.fileId ?? null)
   let hasMore = true
-  let totalSuccess = 0
-  let totalError = 0
+  let queueState: QueueState = 'running'
+  let totalSuccess = checkpointMatchesScope ? (checkpointBeforeStart?.processed_count ?? 0) : 0
+  let totalError = checkpointMatchesScope ? (checkpointBeforeStart?.error_count ?? 0) : 0
   let effectiveBatchSize = batchSize
   const enableTM = settings.enableTranslationMemory !== false
   const fileId = options?.fileId
   const signal = options?.signal
   const providerName = getProviderName()
+  const queueStartedAt = Date.now()
+  const queueConfig = {
+    fileId: fileId ?? null,
+    batchSize,
+    enableTokenOptimizer,
+    tokenBudget,
+  }
+  if (
+    checkpointMatchesScope &&
+    checkpointBeforeStart &&
+    (checkpointBeforeStart.queue_state === 'paused' || checkpointBeforeStart.queue_state === 'stopped' || checkpointBeforeStart.queue_state === 'error')
+  ) {
+    emitSystemLog('info', `[Queue] Resume checkpoint found (processed=${checkpointBeforeStart.processed_count}, errors=${checkpointBeforeStart.error_count})`)
+  }
+
+  const countPendingBlocks = (): number => {
+    if (fileId) {
+      const row = db.prepare(`SELECT COUNT(*) as c FROM translation_blocks WHERE status = 'empty' AND file_id = ?`).get(fileId) as { c: number }
+      return row.c
+    }
+    const row = db.prepare(`SELECT COUNT(*) as c FROM translation_blocks WHERE status = 'empty'`).get() as { c: number }
+    return row.c
+  }
+
+  saveQueueCheckpoint({
+    fileId: fileId ?? null,
+    state: 'running',
+    queueConfig,
+    processedCount: totalSuccess,
+    errorCount: totalError,
+  })
 
   while (hasMore) {
     if (signal?.aborted) {
-      emitSystemLog('warning', '[Queue] Stopped by user.')
+      queueState = currentQueue?.state === 'paused' ? 'paused' : 'stopped'
+      emitSystemLog('warning', queueState === 'paused' ? '[Queue] Paused by user.' : '[Queue] Stopped by user.')
+      saveQueueCheckpoint({
+        fileId: fileId ?? null,
+        state: queueState,
+        queueConfig,
+        processedCount: totalSuccess,
+        errorCount: totalError,
+      })
+      emitQueueProgress({
+        success: totalSuccess,
+        error: totalError,
+        state: queueState,
+        fileId: fileId ?? null,
+        processed: totalSuccess + totalError,
+      })
       break
     }
 
-    // 1. Lấy ra N blocks đang chờ dịch
-    const pendingBlocks = fileId
+    const candidateLimit = Math.max(effectiveBatchSize * 3, effectiveBatchSize)
+    const candidateBlocks = fileId
       ? (db
           .prepare(
             `
         SELECT * FROM translation_blocks
         WHERE status = 'empty' AND file_id = ?
+        ORDER BY id ASC
         LIMIT ?
       `
           )
-          .all(fileId, effectiveBatchSize) as TranslationBlock[])
+          .all(fileId, candidateLimit) as TranslationBlock[])
       : (db
           .prepare(
             `
         SELECT * FROM translation_blocks
         WHERE status = 'empty'
+        ORDER BY id ASC
         LIMIT ?
       `
           )
-          .all(effectiveBatchSize) as TranslationBlock[])
+          .all(candidateLimit) as TranslationBlock[])
+
+    let pendingBlocks = candidateBlocks
+    if (enableTokenOptimizer && candidateBlocks.length > 0) {
+      const plannedSize = planBatchSize(
+        candidateBlocks.map((b) => b.original_text),
+        {
+          minBatchSize: 1,
+          maxBatchSize: Math.max(1, effectiveBatchSize),
+          targetInputTokens: tokenBudget,
+        }
+      )
+      pendingBlocks = candidateBlocks.slice(0, plannedSize)
+      effectiveBatchSize = plannedSize
+    }
 
     if (pendingBlocks.length === 0) {
       console.log('[Queue] All batches completed.')
       emitSystemLog('success', '[Queue] Completed.')
+      queueState = 'done'
+      const throughput = estimateThroughputPerMinute(totalSuccess + totalError, queueStartedAt)
+      emitQueueProgress({
+        success: totalSuccess,
+        error: totalError,
+        state: queueState,
+        fileId: fileId ?? null,
+        processed: totalSuccess + totalError,
+        speedBlocksPerMin: Number(throughput.toFixed(2)),
+        etaSeconds: 0,
+        batchSize: effectiveBatchSize,
+      })
+      saveQueueCheckpoint({
+        fileId: fileId ?? null,
+        lastBlockId: null,
+        state: queueState,
+        queueConfig,
+        processedCount: totalSuccess,
+        errorCount: totalError,
+      })
       hasMore = false
       break
     }
@@ -615,14 +881,28 @@ export async function startBackgroundQueue(
     })()
 
     if (onProgress) onProgress({ success: totalSuccess, error: totalError })
-    emitEngineProgress({ success: totalSuccess, error: totalError })
+    const remainingAfterTm = countPendingBlocks()
+    const throughputAfterTm = estimateThroughputPerMinute(totalSuccess + totalError, queueStartedAt)
+    emitQueueProgress({
+      success: totalSuccess,
+      error: totalError,
+      state: queueState,
+      fileId: fileId ?? null,
+      processed: totalSuccess + totalError,
+      speedBlocksPerMin: Number(throughputAfterTm.toFixed(2)),
+      etaSeconds: estimateEtaSeconds(remainingAfterTm, throughputAfterTm),
+      batchSize: effectiveBatchSize,
+    })
 
     // 2. Gọi AI nếu còn text
     if (textsToTranslate.length > 0) {
       let attempts = 0
       let success = false
+      const estimated = estimateBatchTokens(textsToTranslate)
+      const inputChars = textsToTranslate.reduce((sum, text) => sum + text.length, 0)
 
       while (attempts < 3 && !success) {
+        const requestStartedAt = Date.now()
         try {
           console.log(`[Queue] Calling AI for ${textsToTranslate.length} line(s)...`)
           emitSystemLog('info', `[Queue] Calling AI for ${textsToTranslate.length} line(s)...`)
@@ -637,6 +917,18 @@ export async function startBackgroundQueue(
             : []
 
           const translatedTexts = await AIService.translateBatch(textsToTranslate, glossaryText, contextHistory)
+          const outputChars = translatedTexts.reduce((sum, text) => sum + text.length, 0)
+          writeTokenTelemetry({
+            fileId: fileId ?? null,
+            requestKind: 'queue_batch',
+            batchSize: textsToTranslate.length,
+            inputTokens: estimated.inputTokens,
+            outputTokens: estimated.outputTokens,
+            inputChars,
+            outputChars,
+            durationMs: Date.now() - requestStartedAt,
+            status: 'ok',
+          })
 
           if (translatedTexts.length !== textsToTranslate.length) {
             throw new Error(`JSON output length (${translatedTexts.length}) does not match input (${textsToTranslate.length})`)
@@ -769,7 +1061,20 @@ export async function startBackgroundQueue(
           success = true
 
           if (onProgress) onProgress({ success: totalSuccess, error: totalError })
-          emitEngineProgress({ success: totalSuccess, error: totalError })
+          const remaining = countPendingBlocks()
+          const throughput = estimateThroughputPerMinute(totalSuccess + totalError, queueStartedAt)
+          emitQueueProgress({
+            success: totalSuccess,
+            error: totalError,
+            state: queueState,
+            fileId: fileId ?? null,
+            processed: totalSuccess + totalError,
+            speedBlocksPerMin: Number(throughput.toFixed(2)),
+            etaSeconds: estimateEtaSeconds(remaining, throughput),
+            batchSize: effectiveBatchSize,
+            approxInputTokens: estimated.inputTokens,
+            approxOutputTokens: estimated.outputTokens,
+          })
           emitSystemLog('success', `[Queue] Batch done. success=${totalSuccess}, error=${totalError}`)
 
         } catch (error: unknown) {
@@ -777,32 +1082,51 @@ export async function startBackgroundQueue(
           totalError++
           const normalized = normalizeError(error)
           const message = normalized.message
+          writeTokenTelemetry({
+            fileId: fileId ?? null,
+            requestKind: 'queue_batch',
+            batchSize: textsToTranslate.length,
+            inputTokens: estimated.inputTokens,
+            outputTokens: 0,
+            inputChars,
+            outputChars: 0,
+            durationMs: Date.now() - requestStartedAt,
+            status: 'error',
+            errorType: normalized.name,
+          })
 
           console.error(`[Queue] Error (attempt ${attempts}): ${normalized.name} — ${message}`)
           emitSystemLog('error', `[Queue] ${normalized.name} (attempt ${attempts}): ${message}`)
 
+          const retryPlan = getQueueRetryDelay(normalized, attempts, effectiveBatchSize)
+          effectiveBatchSize = retryPlan.nextBatchSize
+
           if (normalized instanceof RateLimitError) {
-            const waitTime = normalized.retryAfterMs || Math.min(5000, Math.pow(2, attempts) * 500)
+            const waitTime = retryPlan.waitMs
             console.log(`[Queue] Rate limited. Waiting ${waitTime}ms...`)
             await delay(waitTime, signal)
           } else if (normalized instanceof TokenLimitError) {
             // Reduce batch size and retry
-            effectiveBatchSize = Math.max(1, Math.floor(effectiveBatchSize / 2))
             emitSystemLog('warning', `[Queue] Token limit. Reducing batch size to ${effectiveBatchSize}`)
-            await delay(800, signal)
+            await delay(retryPlan.waitMs, signal)
           } else if (normalized instanceof ParsingError) {
             // Retry — might be a fluke with the model
-            await delay(500, signal)
-          } else if (normalized instanceof APIError && normalized.statusCode === 401) {
-            // Auth error — fatal
-            console.error('[Queue] Auth failed. Stopping queue.')
-            emitSystemLog('error', '[Queue] Invalid API key. Stopping queue.')
+            await delay(retryPlan.waitMs, signal)
+          } else {
+            if (normalized instanceof APIError && normalized.statusCode === 401) {
+              console.error('[Queue] Auth failed. Stopping queue.')
+              emitSystemLog('error', '[Queue] Invalid API key. Stopping queue.')
+            } else {
+              console.error('[Queue] Fatal error. Stopping queue.')
+              emitSystemLog('error', `[Queue] Fatal: ${message}`)
+            }
+            queueState = 'error'
             hasMore = false
             break
-          } else {
-            // Other fatal errors
-            console.error('[Queue] Fatal error. Stopping queue.')
-            emitSystemLog('error', `[Queue] Fatal: ${message}`)
+          }
+
+          if (retryPlan.shouldStop) {
+            queueState = 'error'
             hasMore = false
             break
           }
@@ -810,39 +1134,163 @@ export async function startBackgroundQueue(
       }
     }
 
+    const lastBlockId = pendingBlocks.reduce((max, block) => Math.max(max, block.id ?? 0), 0) || null
+    saveQueueCheckpoint({
+      fileId: fileId ?? null,
+      lastBlockId,
+      state: queueState,
+      queueConfig,
+      processedCount: totalSuccess,
+      errorCount: totalError,
+    })
+
     await delay(1000, signal)
   }
 }
 
-let currentQueue: { abort: AbortController; running: boolean } | null = null
+let currentQueue: {
+  abort: AbortController
+  running: boolean
+  state: QueueState
+  fileId: number | null
+  startedAt: number
+} | null = null
 
-export function startQueue(options?: { fileId?: number }): { started: boolean; alreadyRunning: boolean } {
+function startQueueInternal(options?: { fileId?: number }, origin: 'start' | 'resume' = 'start'): { started: boolean; alreadyRunning: boolean } {
   if (currentQueue?.running) {
     emitSystemLog('warning', '[Queue] Already running.')
     return { started: false, alreadyRunning: true }
   }
 
   const abort = new AbortController()
-  currentQueue = { abort, running: true }
+  currentQueue = {
+    abort,
+    running: true,
+    state: 'running',
+    fileId: options?.fileId ?? null,
+    startedAt: Date.now(),
+  }
 
-  emitSystemLog('info', `[Queue] Started${options?.fileId ? ` (fileId=${options.fileId})` : ''}.`)
+  const verb = origin === 'resume' ? 'Resumed' : 'Started'
+  emitSystemLog('info', `[Queue] ${verb}${options?.fileId ? ` (fileId=${options.fileId})` : ''}.`)
+  emitQueueProgress({
+    success: 0,
+    error: 0,
+    state: 'running',
+    fileId: options?.fileId ?? null,
+    processed: 0,
+  })
 
   void startBackgroundQueue(undefined, { fileId: options?.fileId, signal: abort.signal })
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[Queue] Unhandled error:', message)
       emitSystemLog('error', `[Queue] Unhandled error: ${message}`)
+      emitQueueProgress({
+        success: 0,
+        error: 1,
+        state: 'error',
+        fileId: options?.fileId ?? null,
+        processed: 1,
+      })
     })
     .finally(() => {
-      if (currentQueue) currentQueue.running = false
-      emitSystemLog('info', '[Queue] Idle.')
+      const checkpoint = readQueueCheckpoint()
+      const finalState = checkpoint?.queue_state ?? 'idle'
+      if (currentQueue) {
+        currentQueue.running = false
+        currentQueue.state = finalState
+      }
+
+      if (finalState === 'done') {
+        emitSystemLog('success', '[Queue] Idle.')
+      } else if (finalState === 'paused') {
+        emitSystemLog('warning', '[Queue] Paused.')
+      } else if (finalState === 'stopped') {
+        emitSystemLog('warning', '[Queue] Stopped.')
+      } else if (finalState === 'error') {
+        emitSystemLog('error', '[Queue] Error.')
+      } else {
+        emitSystemLog('info', '[Queue] Idle.')
+      }
+
+      emitQueueProgress({
+        success: checkpoint?.processed_count ?? 0,
+        error: checkpoint?.error_count ?? 0,
+        state: finalState,
+        fileId: checkpoint?.file_id ?? options?.fileId ?? null,
+        processed: (checkpoint?.processed_count ?? 0) + (checkpoint?.error_count ?? 0),
+      })
     })
 
   return { started: true, alreadyRunning: false }
 }
 
+export function startQueue(options?: { fileId?: number }): { started: boolean; alreadyRunning: boolean } {
+  return startQueueInternal(options, 'start')
+}
+
+export function pauseQueue(): { paused: boolean } {
+  if (!currentQueue?.running) return { paused: false }
+  currentQueue.state = 'paused'
+  const previous = readQueueCheckpoint()
+  saveQueueCheckpoint({
+    fileId: currentQueue.fileId,
+    state: 'paused',
+    processedCount: previous?.processed_count ?? 0,
+    errorCount: previous?.error_count ?? 0,
+  })
+  currentQueue.abort.abort()
+  return { paused: true }
+}
+
+export function resumeQueue(): { resumed: boolean; alreadyRunning: boolean } {
+  if (currentQueue?.running) return { resumed: false, alreadyRunning: true }
+  const checkpoint = readQueueCheckpoint()
+  if (!checkpoint || checkpoint.queue_state === 'done' || checkpoint.queue_state === 'idle') {
+    return { resumed: false, alreadyRunning: false }
+  }
+
+  const config = resolveQueueConfig(checkpoint.queue_config_json)
+  const targetFileId = config?.fileId ?? checkpoint.file_id
+  const result = startQueueInternal(
+    targetFileId !== null && targetFileId !== undefined ? { fileId: targetFileId } : undefined,
+    'resume'
+  )
+  return { resumed: result.started, alreadyRunning: result.alreadyRunning }
+}
+
+export function getQueueStatus(): {
+  state: QueueState
+  running: boolean
+  fileId: number | null
+  processedCount: number
+  errorCount: number
+  lastBlockId: number | null
+  updatedAt: string | null
+} {
+  const checkpoint = readQueueCheckpoint()
+  return {
+    state: currentQueue?.running ? currentQueue.state : (checkpoint?.queue_state ?? 'idle'),
+    running: !!currentQueue?.running,
+    fileId: currentQueue?.fileId ?? checkpoint?.file_id ?? null,
+    processedCount: checkpoint?.processed_count ?? 0,
+    errorCount: checkpoint?.error_count ?? 0,
+    lastBlockId: checkpoint?.last_block_id ?? null,
+    updatedAt: checkpoint?.updated_at ?? null,
+  }
+}
+
 export function stopQueue(): { stopped: boolean } {
   if (!currentQueue?.running) return { stopped: false }
+  currentQueue.state = 'stopped'
+  const previous = readQueueCheckpoint()
+  saveQueueCheckpoint({
+    fileId: currentQueue.fileId,
+    state: 'stopped',
+    processedCount: previous?.processed_count ?? 0,
+    errorCount: previous?.error_count ?? 0,
+  })
   currentQueue.abort.abort()
   return { stopped: true }
 }

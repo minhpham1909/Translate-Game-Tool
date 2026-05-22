@@ -24,19 +24,13 @@ export interface TMEntry {
 interface TMManagerModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  entries?: TMEntry[]
+  entries: TMEntry[]
   onDelete: (id: number) => void
   onClearUnused: () => void
+  onClearAll: () => void
+  onRestoreLatest: () => void
   onRefresh: () => void
 }
-
-const MOCK_ENTRIES: TMEntry[] = [
-  { id: 1, original_text: 'Welcome to the tutorial!', translated_text: 'Chào mừng đến với hướng dẫn!', usage_count: 42, last_used_at: '30 phút trước' },
-  { id: 2, original_text: 'What would you like to do?', translated_text: 'Bạn muốn làm gì?', usage_count: 18, last_used_at: '1 giờ trước' },
-  { id: 3, original_text: 'The screen fades to black.', translated_text: 'Màn hình chuyển sang đen.', usage_count: 7, last_used_at: '2 giờ trước' },
-  { id: 4, original_text: 'Explore the garden', translated_text: 'Khám phá khu vườn', usage_count: 3, last_used_at: 'Hôm qua' },
-  { id: 5, original_text: 'Talk to Eileen', translated_text: 'Nói chuyện với Eileen', usage_count: 1, last_used_at: 'Hôm qua' },
-]
 
 /**
  * TMManagerModal component
@@ -46,7 +40,7 @@ const MOCK_ENTRIES: TMEntry[] = [
  * @param onRefresh - Reload danh sách từ DB
  */
 export function TMManagerModal({
-  open, onOpenChange, entries = MOCK_ENTRIES, onDelete, onClearUnused, onRefresh,
+  open, onOpenChange, entries, onDelete, onClearUnused, onClearAll, onRestoreLatest, onRefresh,
 }: TMManagerModalProps) {
   const [search, setSearch] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -103,6 +97,25 @@ export function TMManagerModal({
             >
               <Trash2 className="size-3 mr-1.5" />
               Clear Unused
+            </Button>
+            <Button
+              id="btn-clear-all-tm"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={onClearAll}
+            >
+              <Trash2 className="size-3 mr-1.5" />
+              Clear All
+            </Button>
+            <Button
+              id="btn-restore-latest-snapshot"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={onRestoreLatest}
+            >
+              Restore Latest
             </Button>
           </div>
         </DialogHeader>

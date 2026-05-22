@@ -243,6 +243,42 @@ function setupSchema(db: Database.Database): void {
       db.exec(`ALTER TABLE translation_blocks ADD COLUMN translated_by TEXT DEFAULT 'none';`);
     }
 
+    // 3. Token telemetry table: lưu thống kê token/cost runtime theo request
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS token_telemetry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INTEGER,
+        provider_id TEXT NOT NULL,
+        model_id TEXT,
+        request_kind TEXT NOT NULL,
+        batch_size INTEGER DEFAULT 0,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        input_chars INTEGER DEFAULT 0,
+        output_chars INTEGER DEFAULT 0,
+        duration_ms INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'ok',
+        error_type TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_token_telemetry_created ON token_telemetry(created_at);`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_token_telemetry_file ON token_telemetry(file_id);`)
+
+    // 4. Queue checkpoints: dùng để resume queue sau crash/close app
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS queue_checkpoints (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        file_id INTEGER,
+        last_block_id INTEGER,
+        queue_state TEXT NOT NULL,
+        queue_config_json TEXT,
+        processed_count INTEGER DEFAULT 0,
+        error_count INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `)
+
   })
 
   // Thực thi Transaction

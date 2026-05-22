@@ -46,6 +46,7 @@ export interface ExportResult {
   totalFiles: number;
   skippedFiles: number;
   errors: string[];
+  warnings?: string[];
 }
 
 export interface ExportFileEntry {
@@ -181,6 +182,17 @@ export interface AppSettings {
    // Group 10: Database Storage
    // =========================================
    customDbFolder: string; // Đường dẫn tùy chọn để lưu file SQLite. Empty = dùng userData default.
+
+  // =========================================
+  // Group 11: Token Optimizer (Phase 6)
+  // =========================================
+  enableTokenOptimizer: boolean; // Bật/tắt batch planner dựa trên token budget
+  tokenTargetInputTokens: number; // Mức token input mục tiêu cho mỗi request batch
+
+  // =========================================
+  // Group 12: Export Strategy (Phase 6 M2)
+  // =========================================
+  exportMode: 'vortex_like' | 'legacy_overwrite';
 }
 
 /**

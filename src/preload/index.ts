@@ -70,6 +70,14 @@ interface SystemLogEntry {
 interface EngineProgress {
   success: number
   error: number
+  state?: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+  fileId?: number | null
+  processed?: number
+  speedBlocksPerMin?: number
+  etaSeconds?: number | null
+  batchSize?: number
+  approxInputTokens?: number
+  approxOutputTokens?: number
 }
 
 interface CompiledScanResult {
@@ -112,6 +120,7 @@ interface ExportResult {
   totalFiles: number
   skippedFiles: number
   errors: string[]
+  warnings?: string[]
 }
 
 interface RendererApi {
@@ -147,6 +156,12 @@ interface RendererApi {
     clearUnused: () => Promise<void>
     search: (query: string) => Promise<TMEntry[]>
   }
+  globalData: {
+    createSnapshot: () => Promise<string>
+    listSnapshots: () => Promise<string[]>
+    restoreLatestSnapshot: () => Promise<{ restored: boolean; snapshotPath: string | null }>
+    clear: (options: { scope: 'tm' | 'glossary' | 'all'; mode: 'all' | 'unused' | 'older_than_days'; olderThanDays?: number }) => Promise<{ deletedRows: number; snapshotPath: string }>
+  }
   search: {
     searchBlocks: (query: string, options: SearchOptions) => Promise<SearchMatch[]>
     replaceBlockText: (blockId: number, newText: string, isOriginal: boolean) => Promise<void>
@@ -161,7 +176,18 @@ interface RendererApi {
     preflight: (fileId?: number) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
     translateBatch: (blockIds: number[]) => Promise<void>
     startQueue: (options?: { fileId?: number }) => Promise<{ started: boolean; alreadyRunning: boolean }>
+    pauseQueue: () => Promise<{ paused: boolean }>
+    resumeQueue: () => Promise<{ resumed: boolean; alreadyRunning: boolean }>
     stopQueue: () => Promise<{ stopped: boolean }>
+    getQueueStatus: () => Promise<{
+      state: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+      running: boolean
+      fileId: number | null
+      processedCount: number
+      errorCount: number
+      lastBlockId: number | null
+      updatedAt: string | null
+    }>
   }
   events: {
     onSystemLog: (callback: (entry: SystemLogEntry) => void) => () => void
@@ -223,6 +249,13 @@ const api: RendererApi = {
     clearUnused: () => ipcRenderer.invoke('tm:clearUnused') as Promise<void>,
     search: (query: string) => ipcRenderer.invoke('tm:search', query) as Promise<TMEntry[]>
   },
+  globalData: {
+    createSnapshot: () => ipcRenderer.invoke('globalData:createSnapshot') as Promise<string>,
+    listSnapshots: () => ipcRenderer.invoke('globalData:listSnapshots') as Promise<string[]>,
+    restoreLatestSnapshot: () => ipcRenderer.invoke('globalData:restoreLatestSnapshot') as Promise<{ restored: boolean; snapshotPath: string | null }>,
+    clear: (options: { scope: 'tm' | 'glossary' | 'all'; mode: 'all' | 'unused' | 'older_than_days'; olderThanDays?: number }) =>
+      ipcRenderer.invoke('globalData:clear', options) as Promise<{ deletedRows: number; snapshotPath: string }>
+  },
   search: {
     searchBlocks: (query: string, options: SearchOptions) =>
       ipcRenderer.invoke('search:searchBlocks', query, options) as Promise<SearchMatch[]>,
@@ -247,7 +280,19 @@ const api: RendererApi = {
     translateBatch: (blockIds: number[]) => ipcRenderer.invoke('engine:translateBatch', blockIds) as Promise<void>,
     startQueue: (options?: { fileId?: number }) =>
       ipcRenderer.invoke('engine:startQueue', options) as Promise<{ started: boolean; alreadyRunning: boolean }>,
-    stopQueue: () => ipcRenderer.invoke('engine:stopQueue') as Promise<{ stopped: boolean }>
+    pauseQueue: () => ipcRenderer.invoke('engine:pauseQueue') as Promise<{ paused: boolean }>,
+    resumeQueue: () => ipcRenderer.invoke('engine:resumeQueue') as Promise<{ resumed: boolean; alreadyRunning: boolean }>,
+    stopQueue: () => ipcRenderer.invoke('engine:stopQueue') as Promise<{ stopped: boolean }>,
+    getQueueStatus: () =>
+      ipcRenderer.invoke('engine:getQueueStatus') as Promise<{
+        state: 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'done'
+        running: boolean
+        fileId: number | null
+        processedCount: number
+        errorCount: number
+        lastBlockId: number | null
+        updatedAt: string | null
+      }>
   },
   events: {
     onSystemLog: (callback: (entry: SystemLogEntry) => void): (() => void) => {

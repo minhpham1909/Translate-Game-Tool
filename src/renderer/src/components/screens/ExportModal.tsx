@@ -76,6 +76,9 @@ export function ExportModal({ open, onOpenChange }: ExportModalProps): ReactElem
       for (const err of result.errors) {
         appendLog(`Error: ${err}`)
       }
+      for (const warning of result.warnings ?? []) {
+        appendLog(`Warning: ${warning}`)
+      }
 
       for (let i = 0; i <= result.totalFiles; i++) {
         setExportProgress(Math.round((i / Math.max(1, result.totalFiles)) * 100))

@@ -4,13 +4,14 @@ import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGloss
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
 import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation, batchApproveBlocks } from './services/workspaceService'
-import { preFlightAnalyzer, startQueue, stopQueue, translateBatchByBlockIds } from './services/translationEngine'
+import { preFlightAnalyzer, startQueue, stopQueue, pauseQueue, resumeQueue, getQueueStatus, translateBatchByBlockIds } from './services/translationEngine'
 import { parseProjectDiff, previewDiff } from './services/parserService'
 import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
 import { rebuildFtsTable } from './store/database'
 import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
 import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, listBackups, restoreFileBackup, restoreFileToOriginal } from './services/exportService'
+import { clearGlobalDataWithSnapshot, createGlobalDataSnapshot, listGlobalDataSnapshots, restoreLatestGlobalDataSnapshot } from './services/globalDataCenterService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -137,6 +138,22 @@ export function registerIpcHandlers(): void {
     return searchTM(query)
   })
 
+  ipcMain.handle('globalData:createSnapshot', async () => {
+    return await createGlobalDataSnapshot()
+  })
+
+  ipcMain.handle('globalData:listSnapshots', async () => {
+    return await listGlobalDataSnapshots()
+  })
+
+  ipcMain.handle('globalData:restoreLatestSnapshot', async () => {
+    return await restoreLatestGlobalDataSnapshot()
+  })
+
+  ipcMain.handle('globalData:clear', async (_, options: { scope: 'tm' | 'glossary' | 'all'; mode: 'all' | 'unused' | 'older_than_days'; olderThanDays?: number }) => {
+    return await clearGlobalDataWithSnapshot(options)
+  })
+
   // --- Search & Replace ---
   ipcMain.handle('search:searchBlocks', (_, query: string, options: SearchOptions) => {
     return searchBlocks(query, options)
@@ -209,6 +226,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('engine:stopQueue', () => {
     return stopQueue()
+  })
+
+  ipcMain.handle('engine:pauseQueue', () => {
+    return pauseQueue()
+  })
+
+  ipcMain.handle('engine:resumeQueue', () => {
+    return resumeQueue()
+  })
+
+  ipcMain.handle('engine:getQueueStatus', () => {
+    return getQueueStatus()
   })
 
   // --- Export ---
