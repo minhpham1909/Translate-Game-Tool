@@ -20,7 +20,7 @@ import { useTheme } from '@renderer/context/ThemeContext'
 import { useNotification } from '@renderer/context/NotificationContext'
 import { cn } from '@renderer/lib/utils'
 import { TARGET_LANGUAGES, normalizeLanguageCode } from '../../../../shared/types'
-import type { ActiveProviderId, AIProviderConfig, BlacklistPattern } from '../../../../shared/types'
+import type { ActiveProviderId, AIProviderConfig, AppSettings, BlacklistPattern, TranslationStyleProfile } from '../../../../shared/types'
 
 type SettingsTab = 'ai-api' | 'prompt-logic' | 'translation-memory' | 'text-filter' | 'system'
 
@@ -74,6 +74,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   // Prompt & Logic
   const [targetLanguageCode, setTargetLanguageCode] = useState('vietnamese')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [translationStyleProfile, setTranslationStyleProfile] = useState<TranslationStyleProfile>('neutral')
+  const [enableSafetyFallback, setEnableSafetyFallback] = useState(true)
   const [batchSize, setBatchSize] = useState('20')
   const [concurrentRequests, setConcurrentRequests] = useState('1')
   const [temperature, setTemperature] = useState([0.2])
@@ -101,6 +103,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
   // Database Storage
   const [customDbFolder, setCustomDbFolder] = useState('')
+  const [exportMode, setExportMode] = useState<AppSettings['exportMode']>('vortex_like')
+  const [forceTargetLanguageOnLaunch, setForceTargetLanguageOnLaunch] = useState(true)
 
   useEffect(() => {
     if (!open) return
@@ -123,6 +127,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setProviderId(settings.activeProviderId || 'gemini')
       setTemperature([settings.temperature ?? 0.2])
       setSystemPrompt(settings.userCustomPrompt || '')
+      setTranslationStyleProfile(settings.translationStyleProfile ?? 'neutral')
+      setEnableSafetyFallback(settings.enableSafetyFallback ?? true)
       setBatchSize(String(settings.batchSize ?? 20))
       setConcurrentRequests(String(settings.concurrentRequests ?? 1))
       setEnableAutoFill(settings.enableTranslationMemory ?? true)
@@ -137,6 +143,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setMaxLengthRatio([settings.maxLengthRatio ?? 1.3])
       setContextWindowSize([settings.contextWindowSize ?? 5])
       setCustomDbFolder(settings.customDbFolder || '')
+      setExportMode(settings.exportMode ?? 'vortex_like')
+      setForceTargetLanguageOnLaunch(settings.forceTargetLanguageOnLaunch ?? true)
 
       // Normalize target language to code (backward compat with display names)
       const rawLang = settings.targetLanguage || 'vietnamese'
@@ -200,6 +208,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       temperature: temperature[0],
       targetLanguage: targetLanguageCode,
       userCustomPrompt: systemPrompt,
+      translationStyleProfile,
+      enableSafetyFallback,
       batchSize: Number(batchSize) || 20,
       concurrentRequests: Number(concurrentRequests) || 1,
       enableTranslationMemory: enableAutoFill,
@@ -214,6 +224,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       maxLengthRatio: maxLengthRatio[0],
       contextWindowSize: contextWindowSize[0],
       customDbFolder,
+      exportMode,
+      forceTargetLanguageOnLaunch,
       theme,
     })
     onOpenChange(false)
@@ -322,6 +334,16 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     <p className="text-xs text-muted-foreground">
                       Stored locally. Never sent to any server except the provider's API.
                     </p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Force Target Language On Launch</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Generate bootstrap script to auto-switch Ren&apos;Py language to target after export.
+                      </p>
+                    </div>
+                    <Switch checked={forceTargetLanguageOnLaunch} onCheckedChange={setForceTargetLanguageOnLaunch} />
                   </div>
 
                   {/* Model Selection */}
@@ -500,6 +522,33 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     <p className="text-xs text-muted-foreground">
                       Language AI will translate to. Used for folder path (ASCII-safe) and translate header.
                     </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="select-style-profile">Translation Style Profile</Label>
+                    <Select value={translationStyleProfile} onValueChange={(value) => setTranslationStyleProfile(value as TranslationStyleProfile)}>
+                      <SelectTrigger id="select-style-profile">
+                        <SelectValue placeholder="Choose translation style..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="soft">Soft (milder wording)</SelectItem>
+                        <SelectItem value="neutral">Neutral (balanced)</SelectItem>
+                        <SelectItem value="direct">Direct (natural/open)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Controls how explicit/adult dialogue is phrased while preserving context.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">Safety Fallback Chain</Label>
+                      <p className="text-xs text-muted-foreground">
+                        If provider rejects output, retry with safer style profile chain automatically.
+                      </p>
+                    </div>
+                    <Switch checked={enableSafetyFallback} onCheckedChange={setEnableSafetyFallback} />
                   </div>
 
                   <div className="space-y-2">
@@ -825,6 +874,22 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Choose a custom folder to store SQLite database files. Empty = use default location. Each project gets its own file: <code className="bg-muted px-1 py-0.5 rounded">vnt_&lt;GameName&gt;.sqlite</code>
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="select-export-mode">Export Mode</Label>
+                    <Select value={exportMode} onValueChange={(value) => setExportMode(value as AppSettings['exportMode'])}>
+                      <SelectTrigger id="select-export-mode">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="vortex_like">Vortex-like (recommended)</SelectItem>
+                        <SelectItem value="legacy_overwrite">Legacy overwrite source file</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Vortex-like writes to <code className="bg-muted px-1 py-0.5 rounded">game/tl/&lt;target&gt;/...</code>. Legacy mode overwrites source translation files directly.
                     </p>
                   </div>
 

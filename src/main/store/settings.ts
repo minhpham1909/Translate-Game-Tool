@@ -47,6 +47,8 @@ const defaultSettings: AppSettings = {
   targetLanguage: 'vietnamese',
   temperature: 0.2,
   userCustomPrompt: '',
+  translationStyleProfile: 'neutral',
+  enableSafetyFallback: true,
 
   // Group 3
   batchSize: 20,
@@ -88,6 +90,7 @@ const defaultSettings: AppSettings = {
 
   // Group 12
   exportMode: 'vortex_like',
+  forceTargetLanguageOnLaunch: true,
 }
 
 /**

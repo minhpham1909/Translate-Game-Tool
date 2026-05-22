@@ -1,5 +1,5 @@
 import { useCallback, useRef, type ReactElement } from 'react'
-import { AlertTriangle, Check, GitBranch, RotateCcw, Sparkles } from 'lucide-react'
+import { AlertTriangle, Check, Eye, EyeOff, GitBranch, RotateCcw, Sparkles } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { cn } from '@renderer/lib/utils'
@@ -15,6 +15,9 @@ export interface UITranslationBlock {
   translated_text: string | null
   status: BlockStatus
   block_type: 'dialogue' | 'string'
+  visibility?: 'visible' | 'hidden'
+  hidden_reason?: 'dialogue' | 'ui_text' | 'format_token' | 'symbol_only' | 'numeric_only' | 'script_meta' | 'mixed' | null
+  manual_override?: number
 }
 
 interface TranslationCardProps {
@@ -23,6 +26,7 @@ interface TranslationCardProps {
   onApprove: (blockId: number) => void
   onRevert: (blockId: number) => void
   onAITranslate: (blockId: number) => void
+  onToggleVisibility?: (blockId: number, visibility: 'visible' | 'hidden') => void
   isSelected?: boolean
   onSelect?: (blockId: number, event: React.MouseEvent) => void
 }
@@ -79,6 +83,7 @@ export function TranslationCard({
   onApprove,
   onRevert,
   onAITranslate,
+  onToggleVisibility,
   isSelected,
   onSelect,
 }: TranslationCardProps): ReactElement {
@@ -142,6 +147,11 @@ export function TranslationCard({
         {block.character_id && (
           <span className="max-w-full truncate rounded-sm bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary font-semibold">
             {block.character_id}
+          </span>
+        )}
+        {block.visibility === 'hidden' && block.hidden_reason && (
+          <span className="max-w-full truncate rounded-sm bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning font-semibold">
+            {block.hidden_reason}
           </span>
         )}
         {block.status === 'warning' && <AlertTriangle className="size-3 text-warning" />}
@@ -222,6 +232,26 @@ export function TranslationCard({
             </TooltipTrigger>
             <TooltipContent side="top"><p>Approve</p></TooltipContent>
           </Tooltip>
+
+          {onToggleVisibility && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  id={`btn-toggle-visibility-${block.id}`}
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-warning hover:bg-warning/10"
+                  onClick={() => onToggleVisibility(block.id, block.visibility === 'hidden' ? 'visible' : 'hidden')}
+                >
+                  {block.visibility === 'hidden' ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                  <span className="sr-only">Toggle Visibility</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>{block.visibility === 'hidden' ? 'Unhide block' : 'Hide block'}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </TooltipProvider>
       </div>
     </div>

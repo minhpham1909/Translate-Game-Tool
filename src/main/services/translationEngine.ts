@@ -265,7 +265,7 @@ function getQueueRetryDelay(error: unknown, attempts: number, effectiveBatchSize
   return { waitMs: 0, nextBatchSize: effectiveBatchSize, shouldStop: true }
 }
 
-function resolveQueueConfig(raw: string | null): { fileId: number | null; batchSize?: number; enableTokenOptimizer?: boolean; tokenBudget?: number } | null {
+function resolveQueueConfig(raw: string | null): { fileId: number | null; batchSize?: number; enableTokenOptimizer?: boolean; tokenBudget?: number; includeHidden?: boolean } | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
@@ -274,6 +274,7 @@ function resolveQueueConfig(raw: string | null): { fileId: number | null; batchS
       batchSize: typeof parsed.batchSize === 'number' ? parsed.batchSize : undefined,
       enableTokenOptimizer: typeof parsed.enableTokenOptimizer === 'boolean' ? parsed.enableTokenOptimizer : undefined,
       tokenBudget: typeof parsed.tokenBudget === 'number' ? parsed.tokenBudget : undefined,
+      includeHidden: typeof parsed.includeHidden === 'boolean' ? parsed.includeHidden : undefined,
     }
   } catch {
     return null
@@ -297,7 +298,7 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
   if (selectedBlocks.length === 0) return
 
   // CRITICAL: Skip blocks that are already approved (no need to translate again)
-  let blocksToTranslate = selectedBlocks.filter(block => block.status !== 'approved')
+  let blocksToTranslate = selectedBlocks.filter(block => block.status !== 'approved' && block.visibility !== 'hidden')
   const skippedCount = selectedBlocks.length - blocksToTranslate.length
   if (skippedCount > 0) {
     emitSystemLog('info', `[AI] Skipped ${skippedCount} already-approved block(s)`)
@@ -602,16 +603,18 @@ export async function translateBatchByBlockIds(blockIds: number[]): Promise<void
  * Tính năng Pre-flight Analyzer
  */
 export async function preFlightAnalyzer(
-  fileId?: number
+  fileId?: number,
+  includeHidden: boolean = false
 ): Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }> {
   const db = getDatabase()
+  const hiddenClause = includeHidden ? '' : ` AND (visibility IS NULL OR visibility != 'hidden')`
   const row = fileId
     ? (db
         .prepare(
           `
       SELECT COUNT(*) as blockCount, SUM(LENGTH(original_text)) as charCount
       FROM translation_blocks
-      WHERE status = 'empty' AND file_id = ?
+      WHERE status = 'empty'${hiddenClause} AND file_id = ?
     `
         )
         .get(fileId) as { blockCount: number; charCount: number })
@@ -620,7 +623,7 @@ export async function preFlightAnalyzer(
           `
       SELECT COUNT(*) as blockCount, SUM(LENGTH(original_text)) as charCount
       FROM translation_blocks
-      WHERE status = 'empty'
+      WHERE status = 'empty'${hiddenClause}
     `
         )
         .get() as { blockCount: number; charCount: number })
@@ -639,7 +642,7 @@ export async function preFlightAnalyzer(
  */
 export async function startBackgroundQueue(
   onProgress?: (progress: { success: number; error: number }) => void,
-  options?: { fileId?: number; signal?: AbortSignal }
+  options?: { fileId?: number; signal?: AbortSignal; includeHidden?: boolean }
 ): Promise<void> {
   const db = getDatabase()
   const settings = getSettings()
@@ -658,6 +661,7 @@ export async function startBackgroundQueue(
   let effectiveBatchSize = batchSize
   const enableTM = settings.enableTranslationMemory !== false
   const fileId = options?.fileId
+  const includeHidden = options?.includeHidden === true
   const signal = options?.signal
   const providerName = getProviderName()
   const queueStartedAt = Date.now()
@@ -666,6 +670,7 @@ export async function startBackgroundQueue(
     batchSize,
     enableTokenOptimizer,
     tokenBudget,
+    includeHidden,
   }
   if (
     checkpointMatchesScope &&
@@ -676,11 +681,12 @@ export async function startBackgroundQueue(
   }
 
   const countPendingBlocks = (): number => {
+    const hiddenClause = includeHidden ? '' : ` AND (visibility IS NULL OR visibility != 'hidden')`
     if (fileId) {
-      const row = db.prepare(`SELECT COUNT(*) as c FROM translation_blocks WHERE status = 'empty' AND file_id = ?`).get(fileId) as { c: number }
+      const row = db.prepare(`SELECT COUNT(*) as c FROM translation_blocks WHERE status = 'empty'${hiddenClause} AND file_id = ?`).get(fileId) as { c: number }
       return row.c
     }
-    const row = db.prepare(`SELECT COUNT(*) as c FROM translation_blocks WHERE status = 'empty'`).get() as { c: number }
+    const row = db.prepare(`SELECT COUNT(*) as c FROM translation_blocks WHERE status = 'empty'${hiddenClause}`).get() as { c: number }
     return row.c
   }
 
@@ -714,12 +720,13 @@ export async function startBackgroundQueue(
     }
 
     const candidateLimit = Math.max(effectiveBatchSize * 3, effectiveBatchSize)
+    const hiddenClause = includeHidden ? '' : ` AND (visibility IS NULL OR visibility != 'hidden')`
     const candidateBlocks = fileId
       ? (db
           .prepare(
             `
         SELECT * FROM translation_blocks
-        WHERE status = 'empty' AND file_id = ?
+        WHERE status = 'empty'${hiddenClause} AND file_id = ?
         ORDER BY id ASC
         LIMIT ?
       `
@@ -729,7 +736,7 @@ export async function startBackgroundQueue(
           .prepare(
             `
         SELECT * FROM translation_blocks
-        WHERE status = 'empty'
+        WHERE status = 'empty'${hiddenClause}
         ORDER BY id ASC
         LIMIT ?
       `
@@ -1156,7 +1163,7 @@ let currentQueue: {
   startedAt: number
 } | null = null
 
-function startQueueInternal(options?: { fileId?: number }, origin: 'start' | 'resume' = 'start'): { started: boolean; alreadyRunning: boolean } {
+function startQueueInternal(options?: { fileId?: number; includeHidden?: boolean }, origin: 'start' | 'resume' = 'start'): { started: boolean; alreadyRunning: boolean } {
   if (currentQueue?.running) {
     emitSystemLog('warning', '[Queue] Already running.')
     return { started: false, alreadyRunning: true }
@@ -1181,7 +1188,7 @@ function startQueueInternal(options?: { fileId?: number }, origin: 'start' | 're
     processed: 0,
   })
 
-  void startBackgroundQueue(undefined, { fileId: options?.fileId, signal: abort.signal })
+  void startBackgroundQueue(undefined, { fileId: options?.fileId, signal: abort.signal, includeHidden: options?.includeHidden === true })
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[Queue] Unhandled error:', message)
@@ -1226,7 +1233,7 @@ function startQueueInternal(options?: { fileId?: number }, origin: 'start' | 're
   return { started: true, alreadyRunning: false }
 }
 
-export function startQueue(options?: { fileId?: number }): { started: boolean; alreadyRunning: boolean } {
+export function startQueue(options?: { fileId?: number; includeHidden?: boolean }): { started: boolean; alreadyRunning: boolean } {
   return startQueueInternal(options, 'start')
 }
 
@@ -1253,8 +1260,9 @@ export function resumeQueue(): { resumed: boolean; alreadyRunning: boolean } {
 
   const config = resolveQueueConfig(checkpoint.queue_config_json)
   const targetFileId = config?.fileId ?? checkpoint.file_id
+  const includeHidden = config?.includeHidden === true
   const result = startQueueInternal(
-    targetFileId !== null && targetFileId !== undefined ? { fileId: targetFileId } : undefined,
+    targetFileId !== null && targetFileId !== undefined ? { fileId: targetFileId, includeHidden } : { includeHidden },
     'resume'
   )
   return { resumed: result.started, alreadyRunning: result.alreadyRunning }

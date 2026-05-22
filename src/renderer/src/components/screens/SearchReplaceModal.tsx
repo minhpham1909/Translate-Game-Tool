@@ -15,32 +15,33 @@ import { cn } from '@renderer/lib/utils'
 
 interface SearchMatch {
   blockId: number
+  fileId: number
   fileName: string
   lineIndex: number
   text: string
   matchStart: number
   matchEnd: number
+  field: 'original' | 'translated'
 }
 
 interface SearchReplaceModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSearch: (query: string, options: SearchOptions) => SearchMatch[]
-  onReplace: (blockId: number, newText: string) => void
-  onReplaceAll: (matches: SearchMatch[], replaceWith: string) => void
+  activeFileId?: number | null
+  onSearch: (query: string, options: SearchOptions) => Promise<SearchMatch[]> | SearchMatch[]
+  onReplace: (match: SearchMatch, newText: string) => Promise<void> | void
+  onReplaceAll: (matches: SearchMatch[], replaceWith: string) => Promise<void> | void
+  onNavigateToMatch?: (match: SearchMatch) => void
 }
 
 interface SearchOptions {
   matchCase: boolean
   wholeWord: boolean
   useRegex: boolean
+  searchTarget?: 'original' | 'translated' | 'both'
+  includeHidden?: boolean
+  fileId?: number
 }
-
-const MOCK_MATCHES: SearchMatch[] = [
-  { blockId: 1,  fileName: 'script.rpy',   lineIndex: 45,  text: "Welcome to the tutorial!", matchStart: 0,  matchEnd: 7 },
-  { blockId: 8,  fileName: 'script.rpy',   lineIndex: 85,  text: "The roses here are beautiful this time of year.", matchStart: 4, matchEnd: 9 },
-  { blockId: 12, fileName: 'chapter1.rpy', lineIndex: 120, text: "Welcome back, friend.", matchStart: 0, matchEnd: 7 },
-]
 
 /**
  * HighlightedText — render text với phần match được highlight vàng
@@ -63,13 +64,29 @@ function HighlightedText({ text, start, end }: { text: string; start: number; en
  * @param onReplace - Thay thế 1 match
  * @param onReplaceAll - Thay thế tất cả match
  */
-export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalProps) {
+export function SearchReplaceModal({
+  open,
+  onOpenChange,
+  activeFileId,
+  onSearch,
+  onReplace,
+  onReplaceAll,
+  onNavigateToMatch,
+}: SearchReplaceModalProps) {
   const [query, setQuery] = useState('')
   const [replaceWith, setReplaceWith] = useState('')
-  const [options, setOptions] = useState<SearchOptions>({ matchCase: false, wholeWord: false, useRegex: false })
+  const [options, setOptions] = useState<SearchOptions>({
+    matchCase: false,
+    wholeWord: false,
+    useRegex: false,
+    searchTarget: 'both',
+    includeHidden: false,
+    fileId: undefined,
+  })
   const [matches, setMatches] = useState<SearchMatch[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [hasSearched, setHasSearched] = useState(false)
+  const [isWorking, setIsWorking] = useState(false)
 
   const toggleOption = (key: keyof SearchOptions) => {
     setOptions((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -77,14 +94,68 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
 
   const handleSearch = () => {
     if (!query.trim()) return
-    // TODO: Gọi window.api.search.searchBlocks() ở Phase 4E
-    setMatches(MOCK_MATCHES)
-    setCurrentIndex(0)
-    setHasSearched(true)
+    void (async () => {
+      try {
+        setIsWorking(true)
+        const result = await onSearch(query, options)
+        setMatches(result)
+        setCurrentIndex(0)
+        setHasSearched(true)
+      } finally {
+        setIsWorking(false)
+      }
+    })()
+  }
+
+  const handleReplaceOne = () => {
+    const current = matches[currentIndex]
+    if (!current) return
+    const nextText = current.text.slice(0, current.matchStart) + replaceWith + current.text.slice(current.matchEnd)
+    void (async () => {
+      try {
+        setIsWorking(true)
+        await onReplace(current, nextText)
+        handleSearch()
+      } finally {
+        setIsWorking(false)
+      }
+    })()
+  }
+
+  const handleReplaceAll = () => {
+    if (matches.length === 0) return
+    void (async () => {
+      try {
+        setIsWorking(true)
+        await onReplaceAll(matches, replaceWith)
+        handleSearch()
+      } finally {
+        setIsWorking(false)
+      }
+    })()
+  }
+
+  const handleResultClick = (match: SearchMatch, index: number): void => {
+    setCurrentIndex(index)
+    onNavigateToMatch?.(match)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSearch()
+  }
+
+  const goToPrevMatch = () => {
+    const next = Math.max(0, currentIndex - 1)
+    setCurrentIndex(next)
+    const match = matches[next]
+    if (match) onNavigateToMatch?.(match)
+  }
+
+  const goToNextMatch = () => {
+    const next = Math.min(matches.length - 1, currentIndex + 1)
+    setCurrentIndex(next)
+    const match = matches[next]
+    if (match) onNavigateToMatch?.(match)
   }
 
   return (
@@ -108,8 +179,8 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-                <Input
-                  id="input-search-query"
+                 <Input
+                   id="input-search-query"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -141,9 +212,56 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
                   </button>
                 </div>
               </div>
-              <Button id="btn-search" size="sm" className="h-8 text-xs px-3" onClick={handleSearch} disabled={!query.trim()}>
+              <Button id="btn-search" size="sm" className="h-8 text-xs px-3" onClick={handleSearch} disabled={!query.trim() || isWorking}>
                 Search
               </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Quick search: <code>id:123</code>, <code>#123</code>, <code>line:648</code>, <code>l:648</code>, <code>hash:abc123</code>
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
+            <div className="flex items-center gap-1">
+              {(['both', 'translated', 'original'] as const).map((target) => (
+                <button
+                  key={target}
+                  onClick={() => setOptions((prev) => ({ ...prev, searchTarget: target }))}
+                  className={cn(
+                    'px-2 py-1 text-[11px] rounded border transition-colors',
+                    options.searchTarget === target
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {target === 'both' ? 'Both' : target === 'translated' ? 'Translated' : 'Original'}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setOptions((prev) => ({ ...prev, fileId: prev.fileId == null ? activeFileId ?? undefined : undefined }))}
+                className={cn(
+                  'px-2 py-1 text-[11px] rounded border transition-colors',
+                  options.fileId != null
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                )}
+                disabled={activeFileId == null}
+              >
+                Current file
+              </button>
+              <button
+                onClick={() => setOptions((prev) => ({ ...prev, includeHidden: !(prev.includeHidden === true) }))}
+                className={cn(
+                  'px-2 py-1 text-[11px] rounded border transition-colors',
+                  options.includeHidden === true
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Include hidden
+              </button>
             </div>
           </div>
 
@@ -159,10 +277,10 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
                 className="pl-8 h-8 text-xs"
               />
             </div>
-            <Button id="btn-replace" variant="outline" size="sm" className="h-8 text-xs px-3" disabled={matches.length === 0}>
+            <Button id="btn-replace" variant="outline" size="sm" className="h-8 text-xs px-3" onClick={handleReplaceOne} disabled={matches.length === 0 || isWorking}>
               Replace
             </Button>
-            <Button id="btn-replace-all" variant="outline" size="sm" className="h-8 text-xs px-3 text-warning border-warning/30 hover:bg-warning/10 hover:text-warning" disabled={matches.length === 0}>
+            <Button id="btn-replace-all" variant="outline" size="sm" className="h-8 text-xs px-3 text-warning border-warning/30 hover:bg-warning/10 hover:text-warning" onClick={handleReplaceAll} disabled={matches.length === 0 || isWorking}>
               Replace All
             </Button>
           </div>
@@ -180,7 +298,7 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
                       variant="ghost"
                       size="sm"
                       className="h-5 w-5 p-0"
-                      onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
+                      onClick={goToPrevMatch}
                       disabled={currentIndex === 0}
                     >
                       <ChevronLeft className="size-3" />
@@ -192,7 +310,7 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
                       variant="ghost"
                       size="sm"
                       className="h-5 w-5 p-0"
-                      onClick={() => setCurrentIndex((prev) => Math.min(matches.length - 1, prev + 1))}
+                      onClick={goToNextMatch}
                       disabled={currentIndex === matches.length - 1}
                     >
                       <ChevronRight className="size-3" />
@@ -206,8 +324,8 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
                   <div className="p-2 space-y-1">
                     {matches.map((match, i) => (
                       <div
-                        key={match.blockId}
-                        onClick={() => setCurrentIndex(i)}
+                        key={`${match.blockId}-${match.field}-${i}`}
+                        onClick={() => handleResultClick(match, i)}
                         className={cn(
                           'flex flex-col gap-0.5 px-3 py-2 rounded-sm cursor-pointer transition-colors',
                           i === currentIndex
@@ -218,6 +336,7 @@ export function SearchReplaceModal({ open, onOpenChange }: SearchReplaceModalPro
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-mono text-muted-foreground">{match.fileName}</span>
                           <span className="text-[10px] text-muted-foreground">L{match.lineIndex}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase">{match.field}</span>
                         </div>
                         <HighlightedText text={match.text} start={match.matchStart} end={match.matchEnd} />
                       </div>

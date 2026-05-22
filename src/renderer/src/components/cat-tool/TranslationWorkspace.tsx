@@ -13,11 +13,15 @@ interface TranslationWorkspaceProps {
   onApprove: (blockId: number) => void
   onRevert: (blockId: number) => void
   onAITranslate: (blockId: number) => void
+  onToggleVisibility?: (blockId: number, visibility: 'visible' | 'hidden') => void
+  onBatchToggleVisibility?: (blockIds: number[], visibility: 'visible' | 'hidden') => void
   onBatchTranslate?: (blockIds: number[]) => void
   onBatchApprove?: (blockIds: number[]) => void
+  focusBlockId?: number | null
+  onFocusHandled?: () => void
 }
 
-type FilterTab = 'all' | BlockStatus
+type FilterTab = 'all' | 'hidden' | BlockStatus
 
 const TABS: { id: FilterTab; label: string }[] = [
   { id: 'all',      label: 'All' },
@@ -26,6 +30,7 @@ const TABS: { id: FilterTab; label: string }[] = [
   { id: 'approved', label: 'Approved' },
   { id: 'modified', label: 'Modified' },
   { id: 'warning',  label: 'Warning' },
+  { id: 'hidden',   label: 'Hidden' },
 ]
 
 const RENDER_CHUNK_SIZE = 20 // Số card render mỗi lần
@@ -41,8 +46,12 @@ export function TranslationWorkspace({
   onApprove,
   onRevert,
   onAITranslate,
+  onToggleVisibility,
+  onBatchToggleVisibility,
   onBatchTranslate,
   onBatchApprove,
+  focusBlockId,
+  onFocusHandled,
 }: TranslationWorkspaceProps): ReactElement {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all')
   const [renderedCount, setRenderedCount] = useState(RENDER_CHUNK_SIZE)
@@ -55,9 +64,13 @@ export function TranslationWorkspace({
   blocks.forEach((b, idx) => blockIndexMap.set(b.id, idx))
 
   // Lọc theo tab
-  const filteredBlocks = activeFilter === 'all'
-    ? blocks
-    : blocks.filter((b) => b.status === activeFilter)
+  const visibleBlocksOnly = blocks.filter((b) => b.visibility !== 'hidden')
+  const hiddenBlocksOnly = blocks.filter((b) => b.visibility === 'hidden')
+  const filteredBlocks = activeFilter === 'hidden'
+    ? hiddenBlocksOnly
+    : activeFilter === 'all'
+      ? visibleBlocksOnly
+      : visibleBlocksOnly.filter((b) => b.status === activeFilter)
 
   // Danh sách thực sự render
   const visibleBlocks = filteredBlocks.slice(0, renderedCount)
@@ -91,6 +104,36 @@ export function TranslationWorkspace({
       if (currentLoader) observer.unobserve(currentLoader)
     }
   }, [handleObserver])
+
+  useEffect(() => {
+    if (focusBlockId == null) return
+    const targetBlock = blocks.find((b) => b.id === focusBlockId)
+    if (!targetBlock) return
+
+    // Ensure focused block is present in active tab.
+    if (targetBlock.visibility === 'hidden') {
+      if (activeFilter !== 'hidden') setActiveFilter('hidden')
+    } else if (activeFilter === 'hidden') {
+      setActiveFilter('all')
+    }
+
+    const visibleSet = (targetBlock.visibility === 'hidden')
+      ? blocks.filter((b) => b.visibility === 'hidden')
+      : blocks.filter((b) => b.visibility !== 'hidden')
+    const idx = visibleSet.findIndex((b) => b.id === focusBlockId)
+    if (idx >= 0 && idx + 1 > renderedCount) {
+      setRenderedCount(Math.max(RENDER_CHUNK_SIZE, idx + 1))
+    }
+
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`block-card-${focusBlockId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      onFocusHandled?.()
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [focusBlockId, blocks, activeFilter, renderedCount, onFocusHandled])
 
   // Multi-select handler with shift-click support
   const handleSelect = useCallback((blockId: number, _event: React.MouseEvent) => {
@@ -134,13 +177,14 @@ export function TranslationWorkspace({
 
   // Đếm theo từng status để hiển thị badge
   const counts: Record<FilterTab, number> = {
-    all:      blocks.length,
-    empty:    blocks.filter((b) => b.status === 'empty').length,
-    draft:    blocks.filter((b) => b.status === 'draft').length,
-    approved: blocks.filter((b) => b.status === 'approved').length,
-    modified: blocks.filter((b) => b.status === 'modified').length,
-    warning:  blocks.filter((b) => b.status === 'warning').length,
-    skipped:  blocks.filter((b) => b.status === 'skipped').length,
+    all:      visibleBlocksOnly.length,
+    empty:    visibleBlocksOnly.filter((b) => b.status === 'empty').length,
+    draft:    visibleBlocksOnly.filter((b) => b.status === 'draft').length,
+    approved: visibleBlocksOnly.filter((b) => b.status === 'approved').length,
+    modified: visibleBlocksOnly.filter((b) => b.status === 'modified').length,
+    warning:  visibleBlocksOnly.filter((b) => b.status === 'warning').length,
+    skipped:  visibleBlocksOnly.filter((b) => b.status === 'skipped').length,
+    hidden:   hiddenBlocksOnly.length,
   }
 
   const selectedCount = selectedIds.size
@@ -211,6 +255,7 @@ export function TranslationWorkspace({
                   onApprove={onApprove}
                   onRevert={onRevert}
                   onAITranslate={onAITranslate}
+                  onToggleVisibility={onToggleVisibility}
                   isSelected={selectedIds.has(block.id)}
                   onSelect={handleSelect}
                 />
@@ -235,6 +280,8 @@ export function TranslationWorkspace({
           selectedCount={selectedCount}
           onBatchTranslate={() => onBatchTranslate(Array.from(selectedIds))}
           onBatchApprove={() => onBatchApprove(Array.from(selectedIds))}
+          onBatchHide={onBatchToggleVisibility ? () => onBatchToggleVisibility(Array.from(selectedIds), 'hidden') : undefined}
+          onBatchUnhide={onBatchToggleVisibility ? () => onBatchToggleVisibility(Array.from(selectedIds), 'visible') : undefined}
           onClearSelection={handleClearSelection}
           onSelectAll={handleSelectAll}
         />

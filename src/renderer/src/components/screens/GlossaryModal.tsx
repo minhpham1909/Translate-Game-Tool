@@ -30,6 +30,9 @@ interface GlossaryModalProps {
   onUpdate: (id: number, entry: Omit<GlossaryEntry, 'id'>) => void
   onDelete: (id: number) => void
   onSetEnabled: (ids: number[], enabled: boolean) => void
+  onClearAll: () => void
+  onClearOlderThanDays: (days: number) => void
+  onRestoreLatest: () => void
 }
 
 interface EditState {
@@ -48,7 +51,7 @@ interface EditState {
  * @param onDelete - Xóa term
  */
 export function GlossaryModal({
-  open, onOpenChange, entries = [], onAdd, onUpdate, onDelete, onSetEnabled,
+  open, onOpenChange, entries = [], onAdd, onUpdate, onDelete, onSetEnabled, onClearAll, onClearOlderThanDays, onRestoreLatest,
 }: GlossaryModalProps) {
   const [search, setSearch] = useState('')
   const [editState, setEditState] = useState<EditState | null>(null)
@@ -184,6 +187,33 @@ export function GlossaryModal({
               onClick={() => onSetEnabled(entries.map((entry) => entry.id), false)}
             >
               Disable all
+            </Button>
+            <Button
+              id="btn-clear-glossary-all"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={onClearAll}
+            >
+              Clear all
+            </Button>
+            <Button
+              id="btn-clear-glossary-older"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onClearOlderThanDays(30)}
+            >
+              Clear older 30d
+            </Button>
+            <Button
+              id="btn-restore-glossary-latest"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={onRestoreLatest}
+            >
+              Restore latest
             </Button>
             <span className="text-[11px] text-muted-foreground">
               Selected: {selectedIds.length}

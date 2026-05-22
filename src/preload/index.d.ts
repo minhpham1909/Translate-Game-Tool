@@ -22,6 +22,9 @@ export interface WorkspaceBlock {
   translated_text: string | null
   status: BlockStatus
   block_type: 'dialogue' | 'string'
+  visibility?: 'visible' | 'hidden'
+  hidden_reason?: 'dialogue' | 'ui_text' | 'format_token' | 'symbol_only' | 'numeric_only' | 'script_meta' | 'mixed' | null
+  manual_override?: number
 }
 
 export interface GlossaryEntry {
@@ -47,15 +50,20 @@ export interface SearchOptions {
   matchCase: boolean
   wholeWord: boolean
   useRegex: boolean
+  searchTarget?: 'original' | 'translated' | 'both'
+  includeHidden?: boolean
+  fileId?: number
 }
 
 export interface SearchMatch {
   blockId: number
+  fileId: number
   fileName: string
   lineIndex: number
   text: string
   matchStart: number
   matchEnd: number
+  field: 'original' | 'translated'
 }
 
 export type SystemLogType = 'info' | 'warning' | 'error' | 'success'
@@ -192,12 +200,14 @@ declare global {
         getBlocks: (fileId: number) => Promise<WorkspaceBlock[]>
         updateBlock: (blockId: number, text: string | null, status: BlockStatus) => Promise<void>
         batchApprove: (blockIds: number[]) => Promise<void>
+        setVisibility: (blockId: number, visibility: 'visible' | 'hidden') => Promise<void>
+        setVisibilityBatch: (blockIds: number[], visibility: 'visible' | 'hidden') => Promise<void>
       }
 
       engine: {
-        preflight: (fileId?: number) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
+        preflight: (fileId?: number, includeHidden?: boolean) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
         translateBatch: (blockIds: number[]) => Promise<void>
-        startQueue: (options?: { fileId?: number }) => Promise<{ started: boolean; alreadyRunning: boolean }>
+        startQueue: (options?: { fileId?: number; includeHidden?: boolean }) => Promise<{ started: boolean; alreadyRunning: boolean }>
         pauseQueue: () => Promise<{ paused: boolean }>
         resumeQueue: () => Promise<{ resumed: boolean; alreadyRunning: boolean }>
         stopQueue: () => Promise<{ stopped: boolean }>
@@ -231,6 +241,9 @@ declare global {
         listBackups: () => Promise<BackupEntry[]>
         restoreBackup: (fileId: number, backupPath: string) => Promise<void>
         restoreToOriginal: (fileId: number) => Promise<void>
+        clearFileTranslations: (fileId: number, reExport?: boolean) => Promise<void>
+        clearAllTranslations: (reExport?: boolean) => Promise<{ clearedFiles: number }>
+        removeFromGame: () => Promise<{ removedTargetFolder: boolean; removedBootstrapScript: boolean }>
       }
     }
   }

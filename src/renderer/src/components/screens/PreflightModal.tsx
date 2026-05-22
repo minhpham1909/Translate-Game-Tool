@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@renderer/components/ui/dialog'
 import { Button } from '@renderer/components/ui/button'
+import { Switch } from '@renderer/components/ui/switch'
 import { cn } from '@renderer/lib/utils'
 
 type TranslateScope = 'file' | 'project'
@@ -25,7 +26,9 @@ interface PreflightModalProps {
   data: PreflightData
   scope: TranslateScope
   onScopeChange: (scope: TranslateScope) => void
-  onConfirm: () => void
+  includeHidden: boolean
+  onIncludeHiddenChange: (value: boolean) => void
+  onConfirm: (includeHidden: boolean) => void
 }
 
 /**
@@ -66,6 +69,8 @@ export function PreflightModal({
   data,
   scope,
   onScopeChange,
+  includeHidden,
+  onIncludeHiddenChange,
   onConfirm,
 }: PreflightModalProps) {
   const estimatedTokens = Math.round(data.estimatedCharacters / 4)
@@ -146,6 +151,20 @@ export function PreflightModal({
             </div>
           </div>
 
+          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2.5">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-foreground">Include hidden blocks</p>
+              <p className="text-[11px] text-muted-foreground">
+                Bật nếu bạn muốn dịch luôn các block đã bị lọc ẩn.
+              </p>
+            </div>
+            <Switch
+              id="include-hidden-blocks"
+              checked={includeHidden}
+              onCheckedChange={(checked) => onIncludeHiddenChange(checked)}
+            />
+          </div>
+
           {/* Warning */}
           {data.estimatedCost > 1 && (
             <div className="flex items-start gap-2 p-3 rounded-md border border-warning/30 bg-warning/10">
@@ -161,7 +180,7 @@ export function PreflightModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             id="btn-confirm-start-translation"
-            onClick={() => { onConfirm(); onOpenChange(false) }}
+            onClick={() => { onConfirm(includeHidden); onOpenChange(false) }}
             disabled={data.pendingBlocks === 0}
           >
             <Zap className="size-3.5 mr-1.5" />

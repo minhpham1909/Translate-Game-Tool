@@ -243,6 +243,20 @@ function setupSchema(db: Database.Database): void {
       db.exec(`ALTER TABLE translation_blocks ADD COLUMN translated_by TEXT DEFAULT 'none';`);
     }
 
+    const hasVisibility = tableInfo.some(col => col.name === 'visibility');
+    if (!hasVisibility) {
+      db.exec(`ALTER TABLE translation_blocks ADD COLUMN visibility TEXT DEFAULT 'visible';`);
+    }
+    const hasHiddenReason = tableInfo.some(col => col.name === 'hidden_reason');
+    if (!hasHiddenReason) {
+      db.exec(`ALTER TABLE translation_blocks ADD COLUMN hidden_reason TEXT;`);
+    }
+    const hasManualOverride = tableInfo.some(col => col.name === 'manual_override');
+    if (!hasManualOverride) {
+      db.exec(`ALTER TABLE translation_blocks ADD COLUMN manual_override INTEGER DEFAULT 0;`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_blocks_visibility ON translation_blocks(visibility);`)
+
     // 3. Token telemetry table: lưu thống kê token/cost runtime theo request
     db.exec(`
       CREATE TABLE IF NOT EXISTS token_telemetry (

@@ -10,7 +10,7 @@
 
 import { GoogleGenerativeAI, Schema, SchemaType } from '@google/generative-ai'
 import { getSettings, getActiveProviderConfig } from '../store/settings'
-import { AppSettings, getLanguageLabel } from '../../shared/types'
+import { AppSettings, getLanguageLabel, type TranslationStyleProfile } from '../../shared/types'
 import { OpenAICompatibleTranslator } from './translators/OpenAICompatibleTranslator'
 import { APIError } from './errors'
 
@@ -22,6 +22,32 @@ export interface ContextBlock {
   character: string | null
   original: string
   translated: string
+}
+
+function buildStyleProfileInstruction(style: TranslationStyleProfile): string {
+  switch (style) {
+    case 'soft':
+      return 'Ưu tiên từ ngữ tự nhiên, nhẹ nhàng hơn ở đoạn nhạy cảm nhưng không làm sai nghĩa.'
+    case 'direct':
+      return 'Ưu tiên ngôn ngữ tự nhiên, thẳng và mở hơn ở đoạn 18+, tránh vòng vo máy móc.'
+    case 'neutral':
+    default:
+      return 'Giữ văn phong cân bằng, tự nhiên, đúng ngữ cảnh.'
+  }
+}
+
+function applyStyleProfileToPrompt(settings: AppSettings): AppSettings {
+  const style = settings.translationStyleProfile ?? 'neutral'
+  const styleRule = `\n\nSTYLE PROFILE (${style.toUpperCase()}):\n${buildStyleProfileInstruction(style)}`
+  return {
+    ...settings,
+    userCustomPrompt: `${settings.userCustomPrompt || ''}${styleRule}`.trim(),
+  }
+}
+
+function isSafetyRejectedError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error)
+  return /(safety|content policy|content filter|moderation|refus|refuse|blocked|jailbreak)/i.test(msg)
 }
 
 export function getSystemPrompt(targetLanguage: string, userCustomPrompt: string, glossary: string = "", contextHistory: ContextBlock[] = []): string {
@@ -362,6 +388,7 @@ export class AIService {
    */
   static async translateBatch(texts: string[], glossaryText: string = "", contextHistory: ContextBlock[] = []): Promise<string[]> {
     const settings = getSettings()
+    const styledSettings = applyStyleProfileToPrompt(settings)
     const { providerId, config } = getActiveProviderConfig()
 
     if (!config.apiKey) {
@@ -402,18 +429,38 @@ export class AIService {
     const startTime = Date.now()
 
     try {
-      const result = await translator.translate(texts, settings, glossaryText, contextHistory)
+      const result = await translator.translate(texts, styledSettings, glossaryText, contextHistory)
       const duration = Date.now() - startTime
       console.log(`[AI Service | ${translator.providerName}] OK for ${texts.length} item(s) (${duration}ms).`)
       return result
     } catch (error) {
+      if (styledSettings.enableSafetyFallback !== false && isSafetyRejectedError(error)) {
+        const chain: TranslationStyleProfile[] = ['neutral', 'soft']
+        for (const profile of chain) {
+          if (profile === styledSettings.translationStyleProfile) continue
+          try {
+            const fallbackSettings = applyStyleProfileToPrompt({
+              ...settings,
+              translationStyleProfile: profile,
+              userCustomPrompt: '',
+            })
+            const result = await translator.translate(texts, fallbackSettings, glossaryText, contextHistory)
+            const duration = Date.now() - startTime
+            console.warn(`[AI Service | ${translator.providerName}] Safety fallback success with profile=${profile} (${duration}ms).`)
+            return result
+          } catch {
+            // continue chain
+          }
+        }
+      }
+
       if (
         providerId === 'openai_compatible' &&
         isPromptTokenLimitError(error) &&
-        (contextHistory.length > 0 || glossaryText.length > 0 || settings.userCustomPrompt)
+        (contextHistory.length > 0 || glossaryText.length > 0 || styledSettings.userCustomPrompt)
       ) {
         console.warn(`[AI Service | ${translator.providerName}] Prompt tokens limit exceeded. Retrying with trimmed prompt...`)
-        const trimmedSettings = { ...settings, userCustomPrompt: '' }
+        const trimmedSettings = { ...styledSettings, userCustomPrompt: '' }
         try {
           const result = await translator.translate(texts, trimmedSettings, '', [])
           const duration = Date.now() - startTime

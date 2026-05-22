@@ -3,13 +3,15 @@
  * Thanh công cụ nổi hiển thị khi người dùng chọn nhiều block.
  * Cung cấp batch translate, batch approve, và clear selection.
  */
-import { Sparkles, CheckCheck, X, CheckSquare } from 'lucide-react'
+import { Sparkles, CheckCheck, X, CheckSquare, EyeOff, Eye } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 
 interface FloatingActionBarProps {
   selectedCount: number
   onBatchTranslate: () => void
   onBatchApprove: () => void
+  onBatchHide?: () => void
+  onBatchUnhide?: () => void
   onClearSelection: () => void
   onSelectAll?: () => void
 }
@@ -18,6 +20,8 @@ export function FloatingActionBar({
   selectedCount,
   onBatchTranslate,
   onBatchApprove,
+  onBatchHide,
+  onBatchUnhide,
   onClearSelection,
   onSelectAll,
 }: FloatingActionBarProps) {
@@ -60,6 +64,30 @@ export function FloatingActionBar({
             <CheckCheck className="size-3.5" />
             Approve
           </Button>
+
+          {onBatchHide && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={onBatchHide}
+            >
+              <EyeOff className="size-3.5" />
+              Hide
+            </Button>
+          )}
+
+          {onBatchUnhide && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={onBatchUnhide}
+            >
+              <Eye className="size-3.5" />
+              Unhide
+            </Button>
+          )}
         </div>
 
         <div className="ml-auto">

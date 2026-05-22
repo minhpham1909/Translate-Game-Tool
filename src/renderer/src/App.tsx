@@ -101,6 +101,8 @@ function CATWorkspace({
   const [blocks, setBlocks] = useState<UITranslationBlock[]>([])
   const [modals, setModals] = useState<ModalState>(DEFAULT_MODAL_STATE)
   const [preflightScope, setPreflightScope] = useState<'file' | 'project'>('file')
+  const [includeHiddenBlocks, setIncludeHiddenBlocks] = useState<boolean>(false)
+  const [focusBlockId, setFocusBlockId] = useState<number | null>(null)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [preflightData, setPreflightData] = useState({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
   const [glossaryEntries, setGlossaryEntries] = useState<GlossaryModalEntry[]>([])
@@ -336,6 +338,18 @@ function CATWorkspace({
     })()
   }
 
+  const handleToggleVisibility = (blockId: number, visibility: 'visible' | 'hidden'): void => {
+    void (async () => {
+      try {
+        await window.api.workspace.setVisibility(blockId, visibility)
+        if (activeFileId !== null) await fetchBlocks(activeFileId)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        notify.error('Visibility update failed', message)
+      }
+    })()
+  }
+
   const handleBatchTranslate = (blockIds: number[]): void => {
     void (async () => {
       try {
@@ -347,6 +361,22 @@ function CATWorkspace({
         const message = err instanceof Error ? err.message : String(err)
         console.error('Batch translate failed:', message)
         notify.error('Batch Translate Failed', message)
+      }
+    })()
+  }
+
+  const handleBatchToggleVisibility = (blockIds: number[], visibility: 'visible' | 'hidden'): void => {
+    void (async () => {
+      try {
+        await window.api.workspace.setVisibilityBatch(blockIds, visibility)
+        if (activeFileId !== null) await fetchBlocks(activeFileId)
+        notify.success(
+          visibility === 'hidden' ? 'Hide blocks' : 'Unhide blocks',
+          `${blockIds.length} block${blockIds.length > 1 ? 's' : ''} updated`
+        )
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        notify.error('Batch visibility update failed', message)
       }
     })()
   }
@@ -400,17 +430,17 @@ function CATWorkspace({
             setPreflightData({ pendingBlocks: 0, estimatedCharacters: 0, estimatedCost: 0 })
             return
           }
-          const data = await window.api.engine.preflight(activeFileId)
+          const data = await window.api.engine.preflight(activeFileId, includeHiddenBlocks)
           setPreflightData(data)
         } else {
-          const data = await window.api.engine.preflight()
+          const data = await window.api.engine.preflight(undefined, includeHiddenBlocks)
           setPreflightData(data)
         }
       } catch (err) {
         console.error('Failed to load preflight:', err)
       }
     })()
-  }, [modals.preflight, preflightScope, activeFileId])
+  }, [modals.preflight, preflightScope, activeFileId, includeHiddenBlocks])
 
   useEffect(() => {
     if (!modals.glossary) return
@@ -533,8 +563,12 @@ function CATWorkspace({
           onApprove={handleApprove}
           onRevert={handleRevert}
           onAITranslate={handleAITranslate}
+          onToggleVisibility={handleToggleVisibility}
+          onBatchToggleVisibility={handleBatchToggleVisibility}
           onBatchTranslate={handleBatchTranslate}
           onBatchApprove={handleBatchApprove}
+          focusBlockId={focusBlockId}
+          onFocusHandled={() => setFocusBlockId(null)}
         />
       </div>
 
@@ -567,11 +601,13 @@ function CATWorkspace({
         data={{ ...preflightData, activeFileName: activeFile?.file_name }}
         scope={preflightScope}
         onScopeChange={setPreflightScope}
-        onConfirm={() => {
+        includeHidden={includeHiddenBlocks}
+        onIncludeHiddenChange={setIncludeHiddenBlocks}
+        onConfirm={(includeHidden) => {
           if (preflightScope === 'file') {
-            if (activeFileId !== null) void window.api.engine.startQueue({ fileId: activeFileId })
+            if (activeFileId !== null) void window.api.engine.startQueue({ fileId: activeFileId, includeHidden })
           } else {
-            void window.api.engine.startQueue()
+            void window.api.engine.startQueue({ includeHidden })
           }
         }}
       />
@@ -757,14 +793,91 @@ function CATWorkspace({
             notify.error('Toggle failed', message)
           }
         }}
+        onClearAll={() => {
+          const step1 = window.confirm('This will clear ALL glossary terms and create a snapshot. Continue?')
+          if (!step1) return
+          const confirmText = window.prompt('Type CLEAR to confirm:')
+          if (confirmText !== 'CLEAR') return
+          void (async () => {
+            try {
+              await window.api.globalData.clear({ scope: 'glossary', mode: 'all' })
+              setGlossaryEntries([])
+              notify.success('Glossary cleared', 'All glossary entries were removed')
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('Glossary clear failed', message)
+            }
+          })()
+        }}
+        onClearOlderThanDays={(days) => {
+          void (async () => {
+            try {
+              await window.api.globalData.clear({ scope: 'glossary', mode: 'older_than_days', olderThanDays: days })
+              const raw = await window.api.glossary.getAll()
+              setGlossaryEntries(transformGlossaryEntries(raw))
+              notify.success('Glossary cleanup complete', `Entries older than ${days} days removed`)
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('Glossary cleanup failed', message)
+            }
+          })()
+        }}
+        onRestoreLatest={() => {
+          void (async () => {
+            try {
+              const result = await window.api.globalData.restoreLatestSnapshot()
+              if (!result.restored) {
+                notify.error('Restore failed', 'No snapshot found')
+                return
+              }
+              const raw = await window.api.glossary.getAll()
+              setGlossaryEntries(transformGlossaryEntries(raw))
+              notify.success('Restore complete', 'Global DB restored from latest snapshot')
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err)
+              notify.error('Restore failed', message)
+            }
+          })()
+        }}
       />
 
       <SearchReplaceModal
         open={modals.searchReplace}
         onOpenChange={(o) => setModals((p) => ({ ...p, searchReplace: o }))}
-        onSearch={() => []}
-        onReplace={() => {}}
-        onReplaceAll={() => {}}
+        activeFileId={activeFileId}
+        onSearch={(query, options) => window.api.search.searchBlocks(query, options)}
+        onReplace={async (match, newText) => {
+          await window.api.search.replaceBlockText(match.blockId, newText, match.field === 'original')
+          if (activeFileId !== null) await fetchBlocks(activeFileId)
+          await fetchFiles()
+        }}
+        onReplaceAll={async (matches, replaceWith) => {
+          const grouped = new Map<string, typeof matches>()
+          for (const match of matches) {
+            const key = `${match.blockId}:${match.field}`
+            const bucket = grouped.get(key)
+            if (bucket) bucket.push(match)
+            else grouped.set(key, [match])
+          }
+
+          for (const group of grouped.values()) {
+            const base = group[0]
+            let rewritten = base.text
+            const sorted = [...group].sort((a, b) => b.matchStart - a.matchStart)
+            for (const match of sorted) {
+              rewritten = rewritten.slice(0, match.matchStart) + replaceWith + rewritten.slice(match.matchEnd)
+            }
+            await window.api.search.replaceBlockText(base.blockId, rewritten, base.field === 'original')
+          }
+          if (activeFileId !== null) await fetchBlocks(activeFileId)
+          await fetchFiles()
+        }}
+        onNavigateToMatch={(match) => {
+          if (match.fileId !== activeFileId) {
+            setActiveFileId(match.fileId)
+          }
+          setFocusBlockId(match.blockId)
+        }}
       />
 
       <KeyboardShortcutsModal

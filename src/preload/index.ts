@@ -27,15 +27,20 @@ interface SearchOptions {
   matchCase: boolean
   wholeWord: boolean
   useRegex: boolean
+  searchTarget?: 'original' | 'translated' | 'both'
+  includeHidden?: boolean
+  fileId?: number
 }
 
 interface SearchMatch {
   blockId: number
+  fileId: number
   fileName: string
   lineIndex: number
   text: string
   matchStart: number
   matchEnd: number
+  field: 'original' | 'translated'
 }
 
 interface WorkspaceFile {
@@ -57,6 +62,9 @@ interface WorkspaceBlock {
   translated_text: string | null
   status: BlockStatus
   block_type: 'dialogue' | 'string'
+  visibility?: 'visible' | 'hidden'
+  hidden_reason?: 'dialogue' | 'ui_text' | 'format_token' | 'symbol_only' | 'numeric_only' | 'script_meta' | 'mixed' | null
+  manual_override?: number
 }
 
 type SystemLogType = 'info' | 'warning' | 'error' | 'success'
@@ -171,11 +179,13 @@ interface RendererApi {
     getBlocks: (fileId: number) => Promise<WorkspaceBlock[]>
     updateBlock: (blockId: number, text: string | null, status: BlockStatus) => Promise<void>
     batchApprove: (blockIds: number[]) => Promise<void>
+    setVisibility: (blockId: number, visibility: 'visible' | 'hidden') => Promise<void>
+    setVisibilityBatch: (blockIds: number[], visibility: 'visible' | 'hidden') => Promise<void>
   }
   engine: {
-    preflight: (fileId?: number) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
+    preflight: (fileId?: number, includeHidden?: boolean) => Promise<{ pendingBlocks: number; estimatedCharacters: number; estimatedCost: number }>
     translateBatch: (blockIds: number[]) => Promise<void>
-    startQueue: (options?: { fileId?: number }) => Promise<{ started: boolean; alreadyRunning: boolean }>
+    startQueue: (options?: { fileId?: number; includeHidden?: boolean }) => Promise<{ started: boolean; alreadyRunning: boolean }>
     pauseQueue: () => Promise<{ paused: boolean }>
     resumeQueue: () => Promise<{ resumed: boolean; alreadyRunning: boolean }>
     stopQueue: () => Promise<{ stopped: boolean }>
@@ -208,6 +218,9 @@ interface RendererApi {
     listBackups: () => Promise<BackupEntry[]>
     restoreBackup: (fileId: number, backupPath: string) => Promise<void>
     restoreToOriginal: (fileId: number) => Promise<void>
+    clearFileTranslations: (fileId: number, reExport?: boolean) => Promise<void>
+    clearAllTranslations: (reExport?: boolean) => Promise<{ clearedFiles: number }>
+    removeFromGame: () => Promise<{ removedTargetFolder: boolean; removedBootstrapScript: boolean }>
   }
 }
 
@@ -268,17 +281,21 @@ const api: RendererApi = {
     updateBlock: (blockId: number, text: string | null, status: BlockStatus) =>
       ipcRenderer.invoke('workspace:updateBlock', blockId, text, status) as Promise<void>,
     batchApprove: (blockIds: number[]) =>
-      ipcRenderer.invoke('workspace:batchApprove', blockIds) as Promise<void>
+      ipcRenderer.invoke('workspace:batchApprove', blockIds) as Promise<void>,
+    setVisibility: (blockId: number, visibility: 'visible' | 'hidden') =>
+      ipcRenderer.invoke('workspace:setVisibility', blockId, visibility) as Promise<void>,
+    setVisibilityBatch: (blockIds: number[], visibility: 'visible' | 'hidden') =>
+      ipcRenderer.invoke('workspace:setVisibilityBatch', blockIds, visibility) as Promise<void>
   },
   engine: {
-    preflight: (fileId?: number) =>
-      ipcRenderer.invoke('engine:preflight', fileId) as Promise<{
+    preflight: (fileId?: number, includeHidden: boolean = false) =>
+      ipcRenderer.invoke('engine:preflight', fileId, includeHidden) as Promise<{
         pendingBlocks: number
         estimatedCharacters: number
         estimatedCost: number
       }>,
     translateBatch: (blockIds: number[]) => ipcRenderer.invoke('engine:translateBatch', blockIds) as Promise<void>,
-    startQueue: (options?: { fileId?: number }) =>
+    startQueue: (options?: { fileId?: number; includeHidden?: boolean }) =>
       ipcRenderer.invoke('engine:startQueue', options) as Promise<{ started: boolean; alreadyRunning: boolean }>,
     pauseQueue: () => ipcRenderer.invoke('engine:pauseQueue') as Promise<{ paused: boolean }>,
     resumeQueue: () => ipcRenderer.invoke('engine:resumeQueue') as Promise<{ resumed: boolean; alreadyRunning: boolean }>,
@@ -324,7 +341,10 @@ const api: RendererApi = {
     exportSelected: (fileIds: number[], approvedOnly: boolean) => ipcRenderer.invoke('export:exportSelected', fileIds, approvedOnly) as Promise<ExportResult>,
     listBackups: () => ipcRenderer.invoke('export:listBackups') as Promise<BackupEntry[]>,
      restoreBackup: (fileId: number, backupPath: string) => ipcRenderer.invoke('export:restoreBackup', fileId, backupPath) as Promise<void>,
-     restoreToOriginal: (fileId: number) => ipcRenderer.invoke('export:restoreToOriginal', fileId) as Promise<void>
+     restoreToOriginal: (fileId: number) => ipcRenderer.invoke('export:restoreToOriginal', fileId) as Promise<void>,
+     clearFileTranslations: (fileId: number, reExport: boolean = true) => ipcRenderer.invoke('export:clearFileTranslations', fileId, reExport) as Promise<void>,
+     clearAllTranslations: (reExport: boolean = true) => ipcRenderer.invoke('export:clearAllTranslations', reExport) as Promise<{ clearedFiles: number }>,
+     removeFromGame: () => ipcRenderer.invoke('export:removeFromGame') as Promise<{ removedTargetFolder: boolean; removedBootstrapScript: boolean }>
    }
 }
 

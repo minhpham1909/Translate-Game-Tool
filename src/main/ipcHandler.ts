@@ -3,14 +3,14 @@ import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProje
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGlossaryEnabled } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
-import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation, batchApproveBlocks } from './services/workspaceService'
+import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation, batchApproveBlocks, setBlockManualVisibility, setBlocksManualVisibility } from './services/workspaceService'
 import { preFlightAnalyzer, startQueue, stopQueue, pauseQueue, resumeQueue, getQueueStatus, translateBatchByBlockIds } from './services/translationEngine'
 import { parseProjectDiff, previewDiff } from './services/parserService'
 import { AIService } from './api/aiService'
 import { getSettings, saveSettings } from './store/settings'
 import { rebuildFtsTable } from './store/database'
 import { scanCompiledFiles, runUnpacker, installUnpackerDeps } from './services/unpackerService'
-import { exportAllFiles, exportSelectedFiles, getFilesWithChanges, listBackups, restoreFileBackup, restoreFileToOriginal } from './services/exportService'
+import { clearAllTranslations, clearFileTranslations, exportAllFiles, exportSelectedFiles, getFilesWithChanges, listBackups, removeExportedTranslationsFromGame, restoreFileBackup, restoreFileToOriginal } from './services/exportService'
 import { clearGlobalDataWithSnapshot, createGlobalDataSnapshot, listGlobalDataSnapshots, restoreLatestGlobalDataSnapshot } from './services/globalDataCenterService'
 import type { AppSettings, ProjectConfig } from '../shared/types'
 
@@ -201,9 +201,17 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle('workspace:setVisibility', (_, blockId: number, visibility: 'visible' | 'hidden') => {
+    return setBlockManualVisibility(blockId, visibility)
+  })
+
+  ipcMain.handle('workspace:setVisibilityBatch', (_, blockIds: number[], visibility: 'visible' | 'hidden') => {
+    return setBlocksManualVisibility(blockIds, visibility)
+  })
+
   // --- Engine (AI Translation) ---
-  ipcMain.handle('engine:preflight', (_, fileId?: number) => {
-    return preFlightAnalyzer(fileId)
+  ipcMain.handle('engine:preflight', (_, fileId?: number, includeHidden: boolean = false) => {
+    return preFlightAnalyzer(fileId, includeHidden)
   })
 
   ipcMain.handle('engine:translateBatch', async (_, blockIds: number[]) => {
@@ -220,7 +228,7 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('engine:startQueue', (_, options?: { fileId?: number }) => {
+  ipcMain.handle('engine:startQueue', (_, options?: { fileId?: number; includeHidden?: boolean }) => {
     return startQueue(options)
   })
 
@@ -267,5 +275,17 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('export:restoreToOriginal', async (_, fileId: number) => {
     await restoreFileToOriginal(fileId)
+  })
+
+  ipcMain.handle('export:clearFileTranslations', async (_, fileId: number, reExport: boolean = true) => {
+    await clearFileTranslations(fileId, reExport)
+  })
+
+  ipcMain.handle('export:clearAllTranslations', async (_, reExport: boolean = true) => {
+    return await clearAllTranslations(reExport)
+  })
+
+  ipcMain.handle('export:removeFromGame', async () => {
+    return await removeExportedTranslationsFromGame()
   })
 }

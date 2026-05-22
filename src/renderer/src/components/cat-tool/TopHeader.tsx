@@ -37,7 +37,7 @@ interface TopHeaderProps {
  * @param sourceLanguage - Ngôn ngữ nguồn
  * @param onSettingsClick - Mở Settings Modal
  * @param onExportClick - Mở Export Modal
- * @param onRestoreClick - Mở Restore Backup Modal
+ * @param onRestoreClick - Mở Clear Translation Modal
  * @param onPreflightClick - Mở Pre-flight Modal
  * @param onSearchClick - Mở Search & Replace Modal
  * @param onQAClick - Mở QA Report Modal
@@ -201,14 +201,14 @@ export function TopHeader({
             <TooltipContent side="bottom"><p>Update Game Project — preserve translations after game update</p></TooltipContent>
           </Tooltip>
 
-          {/* Restore Backup */}
+          {/* Clear Translation */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button id="btn-open-restore" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onRestoreClick}>
                 <RotateCcw className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Restore Backup — khôi phục file gốc từ bản backup</p></TooltipContent>
+            <TooltipContent side="bottom"><p>Clear translation content for file/project</p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />

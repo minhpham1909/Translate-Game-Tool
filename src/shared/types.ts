@@ -11,6 +11,9 @@ export interface TranslationBlock {
   indentation: string;
   line_index: number;
   translated_by?: string; // Ví dụ: 'gemini', 'claude', 'manual', 'tm', 'blacklist'
+  visibility?: 'visible' | 'hidden';
+  hidden_reason?: 'dialogue' | 'ui_text' | 'format_token' | 'symbol_only' | 'numeric_only' | 'script_meta' | 'mixed' | null;
+  manual_override?: number;
 }
 
 export interface GlossaryRecord {
@@ -105,6 +108,7 @@ export interface AIProviderConfig {
  * Tất cả OpenAI-compatible providers (gpt, deepseek, grok, custom) → 'openai_compatible'
  */
 export type ActiveProviderId = 'gemini' | 'openai_compatible' | 'claude';
+export type TranslationStyleProfile = 'soft' | 'neutral' | 'direct';
 
 export interface AppSettings {
   // =========================================
@@ -132,6 +136,8 @@ export interface AppSettings {
   targetLanguage: string; // Ngôn ngữ đích
   temperature: number; // Mức độ sáng tạo (Mặc định: 0.2 - Rất thấp để tránh lỗi format)
   userCustomPrompt: string; // Prompt do user tự định nghĩa
+  translationStyleProfile: TranslationStyleProfile; // Soft/Neutral/Direct style preset for adult-content naturalness
+  enableSafetyFallback: boolean; // Retry chain when provider rejects for safety reasons
 
   // =========================================
   // Group 3: Queue & Performance
@@ -193,6 +199,7 @@ export interface AppSettings {
   // Group 12: Export Strategy (Phase 6 M2)
   // =========================================
   exportMode: 'vortex_like' | 'legacy_overwrite';
+  forceTargetLanguageOnLaunch: boolean;
 }
 
 /**

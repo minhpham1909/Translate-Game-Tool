@@ -17,7 +17,9 @@ interface RestoreModalProps {
 
 export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
   const [files, setFiles] = useState<ExportFileEntry[]>([])
-  const [restoringId, setRestoringId] = useState<number | null>(null)
+  const [processingId, setProcessingId] = useState<number | null>(null)
+  const [clearingAll, setClearingAll] = useState(false)
+  const [removingFromGame, setRemovingFromGame] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
@@ -35,17 +37,57 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
     }
   }, [])
 
-  const handleRestore = useCallback(async (fileId: number) => {
-    setRestoringId(fileId)
+  const handleClearFile = useCallback(async (fileId: number) => {
+    setProcessingId(fileId)
     setMessage(null)
     try {
-      await window.api.export.restoreToOriginal(fileId)
-      setMessage({ type: 'success', text: `File restored to original successfully.` })
+      await window.api.export.clearFileTranslations(fileId, true)
+      setMessage({ type: 'success', text: `Cleared translated content for selected file.` })
       await loadFiles()
     } catch (err: unknown) {
-      setMessage({ type: 'error', text: `Restore failed: ${err instanceof Error ? err.message : String(err)}` })
+      setMessage({ type: 'error', text: `Clear failed: ${err instanceof Error ? err.message : String(err)}` })
     } finally {
-      setRestoringId(null)
+      setProcessingId(null)
+    }
+  }, [loadFiles])
+
+  const handleRemoveFromGame = useCallback(async () => {
+    const step1 = window.confirm('Remove all exported translation files from game/tl/<target> and language bootstrap script?')
+    if (!step1) return
+    const step2 = window.prompt('Type REMOVE to confirm:')
+    if (step2 !== 'REMOVE') return
+
+    setRemovingFromGame(true)
+    setMessage(null)
+    try {
+      const result = await window.api.export.removeFromGame()
+      const folderStatus = result.removedTargetFolder ? 'target folder removed' : 'target folder not found'
+      const bootstrapStatus = result.removedBootstrapScript ? 'bootstrap removed' : 'bootstrap not found'
+      setMessage({ type: 'success', text: `Removed translation from game: ${folderStatus}, ${bootstrapStatus}.` })
+      await loadFiles()
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: `Remove from game failed: ${err instanceof Error ? err.message : String(err)}` })
+    } finally {
+      setRemovingFromGame(false)
+    }
+  }, [loadFiles])
+
+  const handleClearAll = useCallback(async () => {
+    const step1 = window.confirm('Clear translations for ALL files? This cannot be undone from editor history.')
+    if (!step1) return
+    const step2 = window.prompt('Type CLEAR to confirm:')
+    if (step2 !== 'CLEAR') return
+
+    setClearingAll(true)
+    setMessage(null)
+    try {
+      const result = await window.api.export.clearAllTranslations(true)
+      setMessage({ type: 'success', text: `Cleared translations for ${result.clearedFiles} file(s).` })
+      await loadFiles()
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: `Clear-all failed: ${err instanceof Error ? err.message : String(err)}` })
+    } finally {
+      setClearingAll(false)
     }
   }, [loadFiles])
 
@@ -55,7 +97,7 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RotateCcw className="size-4" />
-            Restore to Original
+            Translation Cleanup
           </DialogTitle>
         </DialogHeader>
 
@@ -104,15 +146,15 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
                         variant="outline"
                         size="sm"
                         className="flex-shrink-0 ml-3 h-7 text-xs gap-1"
-                        onClick={() => handleRestore(file.id)}
-                        disabled={restoringId === file.id}
+                        onClick={() => handleClearFile(file.id)}
+                        disabled={processingId === file.id || clearingAll}
                       >
-                        {restoringId === file.id ? (
+                        {processingId === file.id ? (
                           <Loader2 className="size-3 animate-spin" />
                         ) : (
                           <RotateCcw className="size-3" />
                         )}
-                        Restore
+                        Clear file
                       </Button>
                     </div>
                   )
@@ -120,6 +162,30 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
               </div>
             </ScrollArea>
           )}
+        </div>
+        <div className="pt-3 border-t border-border flex justify-end">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 hover:text-destructive hover:bg-destructive/10"
+              disabled={clearingAll || processingId !== null || removingFromGame}
+              onClick={() => { void handleClearAll() }}
+            >
+              {clearingAll ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+              Clear all files
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 hover:text-destructive hover:bg-destructive/10"
+              disabled={removingFromGame || processingId !== null || clearingAll}
+              onClick={() => { void handleRemoveFromGame() }}
+            >
+              {removingFromGame ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+              Remove translation from game
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
