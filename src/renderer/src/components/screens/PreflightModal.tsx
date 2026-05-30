@@ -10,6 +10,7 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 
 type TranslateScope = 'file' | 'project'
 
@@ -73,6 +74,7 @@ export function PreflightModal({
   onIncludeHiddenChange,
   onConfirm,
 }: PreflightModalProps) {
+  const { t } = useI18n()
   const estimatedTokens = Math.round(data.estimatedCharacters / 4)
 
   return (
@@ -81,10 +83,10 @@ export function PreflightModal({
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-border">
           <DialogTitle className="text-base font-semibold flex items-center gap-2">
             <Zap className="size-4 text-primary" />
-            Pre-flight Check
+            {t('preflight.title')}
           </DialogTitle>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Xem lại thống kê trước khi bắt đầu dịch tự động.
+            {t('preflight.subtitle')}
           </p>
         </DialogHeader>
 
@@ -93,19 +95,19 @@ export function PreflightModal({
           <div className="flex gap-3">
             <StatCard
               icon={<FileText className="size-5" />}
-              label="Pending Blocks"
+              label={t('preflight.pendingBlocks')}
               value={data.pendingBlocks.toLocaleString()}
               valueClassName="text-foreground"
             />
             <StatCard
               icon={<Zap className="size-5" />}
-              label="Est. Tokens"
+              label={t('preflight.estTokens')}
               value={`~${(estimatedTokens / 1000).toFixed(0)}k`}
               valueClassName="text-info"
             />
             <StatCard
               icon={<Coins className="size-5" />}
-              label="Est. Cost"
+              label={t('preflight.estCost')}
               value={`~$${data.estimatedCost.toFixed(2)}`}
               valueClassName="text-warning"
             />
@@ -114,7 +116,7 @@ export function PreflightModal({
           {/* Scope Selection */}
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Phạm vi dịch
+              {t('preflight.scope')}
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -127,9 +129,9 @@ export function PreflightModal({
                     : 'border-border hover:border-primary/40 text-muted-foreground'
                 )}
               >
-                <span className="font-medium">File hiện tại</span>
+                <span className="font-medium">{t('preflight.currentFile')}</span>
                 <span className="text-[11px] text-muted-foreground truncate w-full">
-                  {data.activeFileName ?? 'Chưa chọn file'}
+                  {data.activeFileName ?? t('preflight.noFileSelected')}
                 </span>
               </button>
 
@@ -143,9 +145,9 @@ export function PreflightModal({
                     : 'border-border hover:border-primary/40 text-muted-foreground'
                 )}
               >
-                <span className="font-medium">Toàn bộ project</span>
+                <span className="font-medium">{t('preflight.entireProject')}</span>
                 <span className="text-[11px] text-muted-foreground">
-                  Tất cả file chưa dịch
+                  {t('preflight.allUntranslated')}
                 </span>
               </button>
             </div>
@@ -153,9 +155,9 @@ export function PreflightModal({
 
           <div className="flex items-center justify-between rounded-md border border-border px-3 py-2.5">
             <div className="space-y-0.5">
-              <p className="text-sm font-medium text-foreground">Include hidden blocks</p>
+              <p className="text-sm font-medium text-foreground">{t('preflight.includeHiddenTitle')}</p>
               <p className="text-[11px] text-muted-foreground">
-                Bật nếu bạn muốn dịch luôn các block đã bị lọc ẩn.
+                {t('preflight.includeHiddenDesc')}
               </p>
             </div>
             <Switch
@@ -170,21 +172,21 @@ export function PreflightModal({
             <div className="flex items-start gap-2 p-3 rounded-md border border-warning/30 bg-warning/10">
               <AlertTriangle className="size-4 text-warning flex-shrink-0 mt-0.5" />
               <p className="text-xs text-warning">
-                Chi phí ước tính vượt $1. Đảm bảo bạn đã set giới hạn chi tiêu trong Settings.
+                {t('preflight.costWarning')}
               </p>
             </div>
           )}
         </div>
 
         <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
             id="btn-confirm-start-translation"
             onClick={() => { onConfirm(includeHidden); onOpenChange(false) }}
             disabled={data.pendingBlocks === 0}
           >
             <Zap className="size-3.5 mr-1.5" />
-            Confirm & Start
+            {t('preflight.confirmStart')}
           </Button>
         </DialogFooter>
       </DialogContent>

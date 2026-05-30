@@ -91,6 +91,10 @@ const defaultSettings: AppSettings = {
   // Group 12
   exportMode: 'vortex_like',
   forceTargetLanguageOnLaunch: true,
+
+  // Group 13
+  onboardingCompleted: false,
+  tutorialCompleted: false,
 }
 
 /**

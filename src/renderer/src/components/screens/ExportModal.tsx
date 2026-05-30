@@ -7,6 +7,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { cn } from '@renderer/lib/utils'
+import { getErrorMessage } from '@renderer/lib/errorHandling'
 import type { ExportFileEntry } from '../../../../shared/types'
 
 type ExportStatus = 'idle' | 'exporting' | 'success' | 'error'
@@ -89,7 +90,7 @@ export function ExportModal({ open, onOpenChange }: ExportModalProps): ReactElem
       if (result.skippedFiles > 0) appendLog(`${result.skippedFiles} file(s) skipped due to errors.`)
       setExportStatus('success')
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       appendLog(`Export failed: ${message}`)
       setExportStatus('error')
     }

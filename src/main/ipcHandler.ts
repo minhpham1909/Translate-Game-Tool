@@ -3,6 +3,7 @@ import { scanAvailableLanguages, setupProject, getCurrentProject, getRecentProje
 import { getAllGlossaries, addGlossary, updateGlossary, deleteGlossary, setGlossaryEnabled } from './services/glossaryService'
 import { getTMEntries, deleteTMEntry, clearUnusedTM, searchTM } from './services/tmService'
 import { searchBlocks, replaceBlockText, type SearchOptions } from './services/searchService'
+import { getQAIssues } from './services/qaService'
 import { getWorkspaceFiles, getBlocksByFile, updateBlockTranslation, batchApproveBlocks, setBlockManualVisibility, setBlocksManualVisibility } from './services/workspaceService'
 import { preFlightAnalyzer, startQueue, stopQueue, pauseQueue, resumeQueue, getQueueStatus, translateBatchByBlockIds } from './services/translationEngine'
 import { parseProjectDiff, previewDiff } from './services/parserService'
@@ -161,6 +162,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('search:replaceBlockText', (_, blockId: number, newText: string, isOriginal: boolean) => {
     return replaceBlockText(blockId, newText, isOriginal)
+  })
+
+  ipcMain.handle('qa:getIssues', (_, fileId?: number) => {
+    return getQAIssues(fileId)
   })
 
   // --- Workspace (Phase 4E) ---

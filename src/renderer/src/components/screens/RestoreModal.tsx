@@ -8,6 +8,7 @@ import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { Badge } from '@renderer/components/ui/badge'
 import { Progress } from '@renderer/components/ui/progress'
 import { cn } from '@renderer/lib/utils'
+import { getErrorMessage } from '@renderer/lib/errorHandling'
 import type { ExportFileEntry } from '../../../../shared/types'
 
 interface RestoreModalProps {
@@ -33,7 +34,7 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
       const data = await window.api.export.getFilesWithChanges()
       setFiles(data)
     } catch (err: unknown) {
-      setMessage({ type: 'error', text: `Failed to load files: ${err instanceof Error ? err.message : String(err)}` })
+      setMessage({ type: 'error', text: `Failed to load files: ${getErrorMessage(err)}` })
     }
   }, [])
 
@@ -45,7 +46,7 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
       setMessage({ type: 'success', text: `Cleared translated content for selected file.` })
       await loadFiles()
     } catch (err: unknown) {
-      setMessage({ type: 'error', text: `Clear failed: ${err instanceof Error ? err.message : String(err)}` })
+      setMessage({ type: 'error', text: `Clear failed: ${getErrorMessage(err)}` })
     } finally {
       setProcessingId(null)
     }
@@ -66,7 +67,7 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
       setMessage({ type: 'success', text: `Removed translation from game: ${folderStatus}, ${bootstrapStatus}.` })
       await loadFiles()
     } catch (err: unknown) {
-      setMessage({ type: 'error', text: `Remove from game failed: ${err instanceof Error ? err.message : String(err)}` })
+      setMessage({ type: 'error', text: `Remove from game failed: ${getErrorMessage(err)}` })
     } finally {
       setRemovingFromGame(false)
     }
@@ -85,7 +86,7 @@ export function RestoreModal({ open, onOpenChange }: RestoreModalProps) {
       setMessage({ type: 'success', text: `Cleared translations for ${result.clearedFiles} file(s).` })
       await loadFiles()
     } catch (err: unknown) {
-      setMessage({ type: 'error', text: `Clear-all failed: ${err instanceof Error ? err.message : String(err)}` })
+      setMessage({ type: 'error', text: `Clear-all failed: ${getErrorMessage(err)}` })
     } finally {
       setClearingAll(false)
     }

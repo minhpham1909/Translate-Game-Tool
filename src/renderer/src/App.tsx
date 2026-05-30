@@ -18,6 +18,7 @@ import { GlossaryModal, type GlossaryEntry as GlossaryModalEntry } from '@render
 import { SearchReplaceModal } from '@renderer/components/screens/SearchReplaceModal'
 import { KeyboardShortcutsModal } from '@renderer/components/screens/KeyboardShortcutsModal'
 import { UpdateGameModal } from '@renderer/components/screens/UpdateGameModal'
+import { TutorialOverlay } from '@renderer/components/screens/TutorialOverlay'
 import { TopHeader } from '@renderer/components/cat-tool/TopHeader'
 import { LeftSidebar, SidebarFile } from '@renderer/components/cat-tool/LeftSidebar'
 import { TranslationWorkspace } from '@renderer/components/cat-tool/TranslationWorkspace'
@@ -25,6 +26,7 @@ import { BottomBar, LogEntry, LogType } from '@renderer/components/cat-tool/Bott
 import { SettingsModal } from '@renderer/components/cat-tool/SettingsModal'
 import { UITranslationBlock } from '@renderer/components/cat-tool/TranslationCard'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
+import { getErrorMessage } from '@renderer/lib/errorHandling'
 import type { RecentProject } from '../../shared/types'
 // ============================================================
 
@@ -88,6 +90,10 @@ function CATWorkspace({
   onOpenProject,
   onBackToWelcome,
   onRefreshApiKey,
+  autoOpenPreflight,
+  onAutoPreflightConsumed,
+  showTutorial,
+  onTutorialFinished,
 }: {
   onNewProject: () => void
   onChangeLocation: () => void
@@ -95,6 +101,10 @@ function CATWorkspace({
   onOpenProject: (project: RecentProject) => void
   onBackToWelcome: () => void
   onRefreshApiKey: () => void
+  autoOpenPreflight?: boolean
+  onAutoPreflightConsumed?: () => void
+  showTutorial?: boolean
+  onTutorialFinished?: () => void
 }): ReactElement {
   const [files, setFiles] = useState<SidebarFile[]>([])
   const [activeFileId, setActiveFileId] = useState<number | null>(null)
@@ -113,6 +123,15 @@ function CATWorkspace({
     usage_count: number
     last_used_at: string
   }>>([])
+  const [qaIssues, setQaIssues] = useState<Array<{
+    id: number
+    fileId: number
+    fileName: string
+    lineIndex: number
+    blockHash: string
+    severity: 'warning' | 'error'
+    description: string
+  }>>([])
   const [gameFolderPath, setGameFolderPath] = useState<string>('')
   const [queueRuntime, setQueueRuntime] = useState<QueueRuntimeState>({
     state: 'idle',
@@ -124,6 +143,12 @@ function CATWorkspace({
   const activeFileIdRef = useRef<number | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notify = useNotification()
+
+  useEffect(() => {
+    if (!autoOpenPreflight) return
+    setModals((prev) => ({ ...prev, preflight: true }))
+    onAutoPreflightConsumed?.()
+  }, [autoOpenPreflight])
 
   useEffect(() => {
     void window.api.project.getCurrent().then((config) => {
@@ -320,7 +345,7 @@ function CATWorkspace({
         await fetchFiles()
         notify.success('AI Translation', 'Block translated successfully')
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         console.error('AI translate failed:', message)
         notify.error('AI Translation Failed', message)
         setLogs((prev) => {
@@ -344,7 +369,7 @@ function CATWorkspace({
         await window.api.workspace.setVisibility(blockId, visibility)
         if (activeFileId !== null) await fetchBlocks(activeFileId)
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         notify.error('Visibility update failed', message)
       }
     })()
@@ -358,7 +383,7 @@ function CATWorkspace({
         await fetchFiles()
         notify.success('Batch Translate', `${blockIds.length} blocks translated`)
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         console.error('Batch translate failed:', message)
         notify.error('Batch Translate Failed', message)
       }
@@ -375,7 +400,7 @@ function CATWorkspace({
           `${blockIds.length} block${blockIds.length > 1 ? 's' : ''} updated`
         )
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         notify.error('Batch visibility update failed', message)
       }
     })()
@@ -388,7 +413,7 @@ function CATWorkspace({
         if (activeFileId !== null) await fetchBlocks(activeFileId)
         notify.success('Batch Approve', `${blockIds.length} blocks approved`)
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         console.error('Batch approve failed:', message)
         notify.error('Batch Approve Failed', message)
       }
@@ -397,7 +422,7 @@ function CATWorkspace({
 
   const handleQueuePause = (): void => {
     void window.api.engine.pauseQueue().catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       notify.error('Pause Queue Failed', message)
     })
   }
@@ -408,14 +433,14 @@ function CATWorkspace({
         notify.error('Resume Queue', 'No paused queue checkpoint found.')
       }
     }).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       notify.error('Resume Queue Failed', message)
     })
   }
 
   const handleQueueStop = (): void => {
     void window.api.engine.stopQueue().catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       notify.error('Stop Queue Failed', message)
     })
   }
@@ -450,7 +475,7 @@ function CATWorkspace({
         const raw = await window.api.glossary.getAll()
         if (!cancelled) setGlossaryEntries(transformGlossaryEntries(raw))
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         console.error('Failed to load glossaries:', message)
         if (!cancelled) notify.error('Glossary load failed', message)
       }
@@ -478,12 +503,27 @@ function CATWorkspace({
           )
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = getErrorMessage(err)
         if (!cancelled) notify.error('TM load failed', message)
       }
     })()
     return () => { cancelled = true }
   }, [modals.tmManager])
+
+  useEffect(() => {
+    if (!modals.qaReport) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const raw = await window.api.qa.getIssues(activeFileId ?? undefined)
+        if (!cancelled) setQaIssues(raw)
+      } catch (err: unknown) {
+        const message = getErrorMessage(err)
+        if (!cancelled) notify.error('QA load failed', message)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [modals.qaReport, activeFileId])
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -625,8 +665,13 @@ function CATWorkspace({
       <QAReportModal
         open={modals.qaReport}
         onOpenChange={(o) => setModals((p) => ({ ...p, qaReport: o }))}
-        issues={[]}
-        onGoToBlock={(id) => console.log('[TODO] Go to block:', id)}
+        issues={qaIssues}
+        onGoToBlock={(issue) => {
+          if (issue.fileId !== activeFileId) {
+            setActiveFileId(issue.fileId)
+          }
+          setFocusBlockId(issue.id)
+        }}
       />
 
       <TMManagerModal
@@ -651,7 +696,7 @@ function CATWorkspace({
               )
               notify.success('TM updated', 'Entry deleted')
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('TM delete failed', message)
             }
           })()
@@ -675,7 +720,7 @@ function CATWorkspace({
               )
               notify.success('TM cleanup complete', 'Unused entries cleared')
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('TM cleanup failed', message)
             }
           })()
@@ -691,7 +736,7 @@ function CATWorkspace({
               setTmEntries([])
               notify.success('TM cleared', 'All TM entries were removed')
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('TM clear failed', message)
             }
           })()
@@ -718,7 +763,7 @@ function CATWorkspace({
               )
               notify.success('Restore complete', 'Global DB restored from latest snapshot')
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('Restore failed', message)
             }
           })()
@@ -739,7 +784,7 @@ function CATWorkspace({
                   }))
               )
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('TM refresh failed', message)
             }
           })()
@@ -757,7 +802,7 @@ function CATWorkspace({
             setGlossaryEntries(transformGlossaryEntries(raw))
             notify.success('Term added', `${e.source_text} → ${e.target_text}`)
           } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err)
+            const message = getErrorMessage(err)
             notify.error('Add failed', message)
           }
         }}
@@ -768,7 +813,7 @@ function CATWorkspace({
             setGlossaryEntries(transformGlossaryEntries(raw))
             notify.success('Term updated', e.source_text)
           } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err)
+            const message = getErrorMessage(err)
             notify.error('Update failed', message)
           }
         }}
@@ -779,7 +824,7 @@ function CATWorkspace({
             setGlossaryEntries(transformGlossaryEntries(raw))
             notify.success('Term deleted', 'Removed from glossary')
           } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err)
+            const message = getErrorMessage(err)
             notify.error('Delete failed', message)
           }
         }}
@@ -789,7 +834,7 @@ function CATWorkspace({
             const raw = await window.api.glossary.getAll()
             setGlossaryEntries(transformGlossaryEntries(raw))
           } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err)
+            const message = getErrorMessage(err)
             notify.error('Toggle failed', message)
           }
         }}
@@ -804,7 +849,7 @@ function CATWorkspace({
               setGlossaryEntries([])
               notify.success('Glossary cleared', 'All glossary entries were removed')
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('Glossary clear failed', message)
             }
           })()
@@ -817,7 +862,7 @@ function CATWorkspace({
               setGlossaryEntries(transformGlossaryEntries(raw))
               notify.success('Glossary cleanup complete', `Entries older than ${days} days removed`)
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('Glossary cleanup failed', message)
             }
           })()
@@ -834,7 +879,7 @@ function CATWorkspace({
               setGlossaryEntries(transformGlossaryEntries(raw))
               notify.success('Restore complete', 'Global DB restored from latest snapshot')
             } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err)
+              const message = getErrorMessage(err)
               notify.error('Restore failed', message)
             }
           })()
@@ -894,6 +939,12 @@ function CATWorkspace({
           void fetchFiles()
         }}
       />
+
+      <TutorialOverlay
+        open={showTutorial === true}
+        onFinish={() => onTutorialFinished?.()}
+        onSkip={() => onTutorialFinished?.()}
+      />
     </div>
   )
 }
@@ -908,6 +959,9 @@ function AppContent(): ReactElement {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [hasApiKey, setHasApiKey] = useState(false)
   const [workspaceKey, setWorkspaceKey] = useState(0)
+  const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  const [tutorialCompleted, setTutorialCompleted] = useState(false)
+  const [openPreflightOnEnter, setOpenPreflightOnEnter] = useState(false)
 
   // Khởi động: luôn vào Welcome, chỉ load danh sách recent
   useEffect(() => {
@@ -925,12 +979,20 @@ function AppContent(): ReactElement {
           || (providers?.claude?.apiKey || '') !== ''
           || (providers?.openai_compatible?.apiKey || '') !== ''
         setHasApiKey(keySet)
+        setOnboardingCompleted(settings.onboardingCompleted === true)
+        setTutorialCompleted(settings.tutorialCompleted === true)
       } catch (err) {
         console.error('Failed to check API key:', err)
       }
     }
     loadRecent()
   }, [])
+
+  useEffect(() => {
+    if (!hasProject && !onboardingCompleted) {
+      setIsWizardOpen(true)
+    }
+  }, [hasProject, onboardingCompleted])
 
   const refreshRecent = async (): Promise<void> => {
     try {
@@ -950,7 +1012,7 @@ function AppContent(): ReactElement {
       setHasProject(true)
       setWorkspaceKey((prev) => prev + 1)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       console.error('Failed to open project:', message)
       notify.error('Failed to open project', message)
     }
@@ -963,7 +1025,7 @@ function AppContent(): ReactElement {
       const msg = deleteFiles ? 'Project và file dịch đã được xóa.' : 'Project đã được xóa khỏi danh sách recent.'
       notify.success('Đã xóa project', msg)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       console.error('Failed to delete project:', message)
       notify.error('Failed to delete project', message)
     }
@@ -979,6 +1041,13 @@ function AppContent(): ReactElement {
           recentProjects={recentProjects}
           onOpenProject={handleOpenProject}
           onBackToWelcome={() => setHasProject(false)}
+          autoOpenPreflight={openPreflightOnEnter}
+          onAutoPreflightConsumed={() => setOpenPreflightOnEnter(false)}
+          showTutorial={!tutorialCompleted}
+          onTutorialFinished={() => {
+            setTutorialCompleted(true)
+            void window.api.settings.save({ tutorialCompleted: true })
+          }}
           onRefreshApiKey={() => {
             void window.api.settings.get().then((settings) => {
               const providers = settings.providers
@@ -986,6 +1055,8 @@ function AppContent(): ReactElement {
                 || (providers?.claude?.apiKey || '') !== ''
                 || (providers?.openai_compatible?.apiKey || '') !== ''
               setHasApiKey(keySet)
+              setOnboardingCompleted(settings.onboardingCompleted === true)
+              setTutorialCompleted(settings.tutorialCompleted === true)
             })
           }}
         />
@@ -1002,9 +1073,10 @@ function AppContent(): ReactElement {
         open={isWizardOpen}
         onOpenChange={setIsWizardOpen}
         onComplete={(config) => {
-          void config
+          setOpenPreflightOnEnter(config.runPreflightAfterSetup === true)
           void refreshRecent()
           setHasProject(true)
+          setOnboardingCompleted(true)
           setWorkspaceKey((prev) => prev + 1)
         }}
       />

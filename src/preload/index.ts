@@ -43,6 +43,16 @@ interface SearchMatch {
   field: 'original' | 'translated'
 }
 
+interface QAIssue {
+  id: number
+  fileId: number
+  fileName: string
+  lineIndex: number
+  blockHash: string
+  severity: 'warning' | 'error'
+  description: string
+}
+
 interface WorkspaceFile {
   id: number
   file_path: string
@@ -174,6 +184,9 @@ interface RendererApi {
     searchBlocks: (query: string, options: SearchOptions) => Promise<SearchMatch[]>
     replaceBlockText: (blockId: number, newText: string, isOriginal: boolean) => Promise<void>
   }
+  qa: {
+    getIssues: (fileId?: number) => Promise<QAIssue[]>
+  }
   workspace: {
     getFiles: () => Promise<WorkspaceFile[]>
     getBlocks: (fileId: number) => Promise<WorkspaceBlock[]>
@@ -274,6 +287,9 @@ const api: RendererApi = {
       ipcRenderer.invoke('search:searchBlocks', query, options) as Promise<SearchMatch[]>,
     replaceBlockText: (blockId: number, newText: string, isOriginal: boolean) =>
       ipcRenderer.invoke('search:replaceBlockText', blockId, newText, isOriginal) as Promise<void>
+  },
+  qa: {
+    getIssues: (fileId?: number) => ipcRenderer.invoke('qa:getIssues', fileId) as Promise<QAIssue[]>
   },
   workspace: {
     getFiles: () => ipcRenderer.invoke('workspace:getFiles') as Promise<WorkspaceFile[]>,

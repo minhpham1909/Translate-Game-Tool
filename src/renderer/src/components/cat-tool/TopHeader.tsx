@@ -12,6 +12,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useTheme } from '@renderer/context/ThemeContext'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 
 interface TopHeaderProps {
   activeFileName?: string
@@ -64,6 +65,7 @@ export function TopHeader({
   onBackToWelcome,
 }: TopHeaderProps) {
   const { theme, setTheme } = useTheme()
+  const { t } = useI18n()
 
   const cycleTheme = () => {
     if (theme === 'dark') setTheme('light')
@@ -77,13 +79,13 @@ export function TopHeader({
                          <Monitor className="size-3.5" />
 
   const themeLabel =
-    theme === 'dark'   ? 'Dark mode'   :
-    theme === 'light'  ? 'Light mode'  :
-                         'System theme'
+    theme === 'dark'   ? t('topHeader.darkMode')   :
+    theme === 'light'  ? t('topHeader.lightMode')  :
+                         t('topHeader.systemTheme')
 
   const displayName = gameFolderPath
     ? gameFolderPath.split(/[\\/]/).pop() || gameFolderPath
-    : 'Project'
+    : t('topHeader.project')
 
   return (
     <header className="h-11 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-3">
@@ -100,7 +102,7 @@ export function TopHeader({
           'font-medium font-mono truncate',
           activeFileName ? 'text-foreground' : 'text-muted-foreground'
         )}>
-          {activeFileName || 'Select a file'}
+          {activeFileName || t('topHeader.selectFile')}
         </span>
         {gameFolderPath && (
           <>
@@ -121,10 +123,10 @@ export function TopHeader({
             <TooltipTrigger asChild>
               <Button id="btn-back-to-welcome" variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1.5" onClick={onBackToWelcome}>
                 <ArrowLeft className="size-3.5" />
-                <span className="hidden xl:inline">Home</span>
+                <span className="hidden xl:inline">{t('topHeader.home')}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Back to Home Screen</p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.backToHome')}</p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-0.5" />
@@ -134,10 +136,10 @@ export function TopHeader({
             <TooltipTrigger asChild>
               <Button id="btn-open-preflight" variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1.5" onClick={onPreflightClick}>
                 <BarChart3 className="size-3.5" />
-                <span className="hidden xl:inline">Pre-flight</span>
+                <span className="hidden xl:inline">{t('topHeader.preflight')}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Phân tích & dịch hàng loạt <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+A</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.preflightTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+A</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* Search */}
@@ -145,10 +147,10 @@ export function TopHeader({
             <TooltipTrigger asChild>
               <Button id="btn-open-search" variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1.5" onClick={onSearchClick}>
                 <Search className="size-3.5" />
-                <span className="hidden xl:inline">Search</span>
+                <span className="hidden xl:inline">{t('topHeader.search')}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Tìm & thay thế toàn project <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+F</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.searchTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+F</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* QA Report */}
@@ -158,7 +160,7 @@ export function TopHeader({
                 <ShieldAlert className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>QA Report Dashboard <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+Q</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.qaTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+Q</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* Glossary */}
@@ -168,7 +170,7 @@ export function TopHeader({
                 <BookMarked className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Glossary Manager <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+G</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.glossaryTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+Shift+G</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* TM Manager */}
@@ -178,7 +180,7 @@ export function TopHeader({
                 <Database className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Translation Memory Manager</p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.tmTooltip')}</p></TooltipContent>
           </Tooltip>
 
           {/* Keyboard Shortcuts */}
@@ -188,7 +190,7 @@ export function TopHeader({
                 <Keyboard className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Keyboard Shortcuts <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">F1</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.shortcutsTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">F1</kbd></p></TooltipContent>
           </Tooltip>
 
           {/* Update Game */}
@@ -198,7 +200,7 @@ export function TopHeader({
                 <RefreshCw className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Update Game Project — preserve translations after game update</p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.updateGameTooltip')}</p></TooltipContent>
           </Tooltip>
 
           {/* Clear Translation */}
@@ -208,7 +210,7 @@ export function TopHeader({
                 <RotateCcw className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Clear translation content for file/project</p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.clearTooltip')}</p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />
@@ -218,7 +220,7 @@ export function TopHeader({
             <TooltipTrigger asChild>
               <Button id="btn-toggle-theme" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={cycleTheme}>
                 {themeIcon}
-                <span className="sr-only">Toggle theme</span>
+                <span className="sr-only">{t('topHeader.toggleTheme')}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom"><p>{themeLabel}</p></TooltipContent>
@@ -231,7 +233,7 @@ export function TopHeader({
                 <Settings className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Cài đặt <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+,</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.settingsTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+,</kbd></p></TooltipContent>
           </Tooltip>
 
           <div className="w-px h-5 bg-border mx-1" />
@@ -241,10 +243,10 @@ export function TopHeader({
             <TooltipTrigger asChild>
               <Button id="btn-open-export" size="sm" className="h-7 px-3 text-xs gap-1.5" onClick={onExportClick}>
                 <Download className="size-3.5" />
-                Export
+                {t('common.export')}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Xuất file dịch <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+E</kbd></p></TooltipContent>
+            <TooltipContent side="bottom"><p>{t('topHeader.exportTooltip')} <kbd className="ml-1 text-[10px] bg-muted px-1 rounded border border-border">Ctrl+E</kbd></p></TooltipContent>
           </Tooltip>
         </div>
       </TooltipProvider>

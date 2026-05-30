@@ -12,6 +12,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 
 interface SearchMatch {
   blockId: number
@@ -73,6 +74,7 @@ export function SearchReplaceModal({
   onReplaceAll,
   onNavigateToMatch,
 }: SearchReplaceModalProps) {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [replaceWith, setReplaceWith] = useState('')
   const [options, setOptions] = useState<SearchOptions>({
@@ -165,7 +167,7 @@ export function SearchReplaceModal({
           <div className="flex items-center justify-between">
             <DialogTitle className="text-sm font-semibold flex items-center gap-2">
               <Search className="size-3.5 text-primary" />
-              Global Search & Replace
+              {t('searchReplace.title')}
             </DialogTitle>
             <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => onOpenChange(false)}>
               <X className="size-3.5" />
@@ -184,7 +186,8 @@ export function SearchReplaceModal({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Find what..."
+                  placeholder={t('searchReplace.findPlaceholder')}
+                   
                   className="pl-8 h-8 text-xs pr-28"
                 />
                 {/* Toggle Buttons inside input */}
@@ -213,11 +216,11 @@ export function SearchReplaceModal({
                 </div>
               </div>
               <Button id="btn-search" size="sm" className="h-8 text-xs px-3" onClick={handleSearch} disabled={!query.trim() || isWorking}>
-                Search
+                {t('searchReplace.search')}
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Quick search: <code>id:123</code>, <code>#123</code>, <code>line:648</code>, <code>l:648</code>, <code>hash:abc123</code>
+              {t('searchReplace.quickHint')} <code>id:123</code>, <code>#123</code>, <code>line:648</code>, <code>l:648</code>, <code>hash:abc123</code>
             </p>
           </div>
 
@@ -234,7 +237,7 @@ export function SearchReplaceModal({
                       : 'border-border text-muted-foreground hover:text-foreground'
                   )}
                 >
-                  {target === 'both' ? 'Both' : target === 'translated' ? 'Translated' : 'Original'}
+                  {target === 'both' ? t('searchReplace.both') : target === 'translated' ? t('searchReplace.translated') : t('searchReplace.original')}
                 </button>
               ))}
             </div>
@@ -249,7 +252,7 @@ export function SearchReplaceModal({
                 )}
                 disabled={activeFileId == null}
               >
-                Current file
+                {t('searchReplace.currentFile')}
               </button>
               <button
                 onClick={() => setOptions((prev) => ({ ...prev, includeHidden: !(prev.includeHidden === true) }))}
@@ -260,7 +263,7 @@ export function SearchReplaceModal({
                     : 'border-border text-muted-foreground hover:text-foreground'
                 )}
               >
-                Include hidden
+                {t('searchReplace.includeHidden')}
               </button>
             </div>
           </div>
@@ -273,15 +276,15 @@ export function SearchReplaceModal({
                 id="input-replace-with"
                 value={replaceWith}
                 onChange={(e) => setReplaceWith(e.target.value)}
-                placeholder="Replace with..."
+                placeholder={t('searchReplace.replacePlaceholder')}
                 className="pl-8 h-8 text-xs"
               />
             </div>
             <Button id="btn-replace" variant="outline" size="sm" className="h-8 text-xs px-3" onClick={handleReplaceOne} disabled={matches.length === 0 || isWorking}>
-              Replace
+              {t('searchReplace.replace')}
             </Button>
             <Button id="btn-replace-all" variant="outline" size="sm" className="h-8 text-xs px-3 text-warning border-warning/30 hover:bg-warning/10 hover:text-warning" onClick={handleReplaceAll} disabled={matches.length === 0 || isWorking}>
-              Replace All
+              {t('searchReplace.replaceAll')}
             </Button>
           </div>
 
@@ -290,7 +293,7 @@ export function SearchReplaceModal({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
-                  {matches.length === 0 ? 'Không tìm thấy kết quả' : `${matches.length} kết quả tìm được`}
+                  {matches.length === 0 ? t('searchReplace.noResult') : t('searchReplace.foundResult', { count: matches.length })}
                 </span>
                 {matches.length > 0 && (
                   <div className="flex items-center gap-1">

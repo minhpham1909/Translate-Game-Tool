@@ -18,6 +18,7 @@ type Severity = 'warning' | 'error'
 
 export interface QAIssue {
   id: number
+  fileId: number
   fileName: string
   lineIndex: number
   blockHash: string
@@ -29,23 +30,15 @@ interface QAReportModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   issues: QAIssue[]
-  onGoToBlock: (blockId: number) => void
+  onGoToBlock: (issue: QAIssue) => void
 }
-
-const MOCK_ISSUES: QAIssue[] = [
-  { id: 4,  fileName: 'script.rpy',    lineIndex: 52,  blockHash: '#start_004', severity: 'warning', description: 'Missing {i} closing tag in translation' },
-  { id: 12, fileName: 'chapter1.rpy',  lineIndex: 120, blockHash: '#ch1_012',   severity: 'warning', description: 'Missing [player_name] variable' },
-  { id: 28, fileName: 'chapter1.rpy',  lineIndex: 310, blockHash: '#ch1_028',   severity: 'error',   description: 'Mismatched {color=} tag count (1 open, 0 close)' },
-  { id: 55, fileName: 'chapter2.rpy',  lineIndex: 78,  blockHash: '#ch2_055',   severity: 'warning', description: 'Missing [gold] variable' },
-  { id: 89, fileName: 'screens.rpy',   lineIndex: 45,  blockHash: '#scr_089',   severity: 'warning', description: 'Missing {b} bold tag' },
-]
 
 /**
  * QAReportModal component
  * @param issues - Danh sách lỗi từ QA Linter (qua DB query)
  * @param onGoToBlock - Callback nhảy đến block lỗi trong workspace
  */
-export function QAReportModal({ open, onOpenChange, issues = MOCK_ISSUES, onGoToBlock }: QAReportModalProps) {
+export function QAReportModal({ open, onOpenChange, issues, onGoToBlock }: QAReportModalProps) {
   const [search, setSearch] = useState('')
   const [filterSeverity, setFilterSeverity] = useState<'all' | Severity>('all')
 
@@ -134,7 +127,7 @@ export function QAReportModal({ open, onOpenChange, issues = MOCK_ISSUES, onGoTo
                 {filtered.map((issue) => (
                   <tr
                     key={issue.id}
-                    onClick={() => { onGoToBlock(issue.id); onOpenChange(false) }}
+                    onClick={() => { onGoToBlock(issue); onOpenChange(false) }}
                     className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors group"
                   >
                     <td className="px-4 py-2.5">

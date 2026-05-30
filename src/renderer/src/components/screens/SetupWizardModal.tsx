@@ -17,9 +17,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Progress } from '@renderer/components/ui/progress'
 import { cn } from '@renderer/lib/utils'
 import { useNotification } from '@renderer/context/NotificationContext'
+import { getErrorMessage } from '@renderer/lib/errorHandling'
 import { TARGET_LANGUAGES } from '../../../../shared/types'
+import type { ActiveProviderId, AIProviderConfig } from '../../../../shared/types'
 
-type WizardStep = 1 | 2 | 3
+type WizardStep = 1 | 2 | 3 | 4
 type ParseStatus = 'idle' | 'parsing' | 'success' | 'error'
 type UnpackStatus = 'idle' | 'checking' | 'warning' | 'unpacking' | 'done' | 'error'
 
@@ -27,13 +29,14 @@ interface SetupWizardModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Callback khi setup hoàn tất, truyền config về App */
-  onComplete: (config: { gameFolderPath: string; sourceLanguage: string; targetLanguage: string }) => void
+  onComplete: (config: { gameFolderPath: string; sourceLanguage: string; targetLanguage: string; runPreflightAfterSetup?: boolean }) => void
 }
 
 const STEP_LABELS: Record<WizardStep, string> = {
   1: 'Select Game Folder',
   2: 'Select Source Language',
-  3: 'Confirm & Parse',
+  3: 'AI Setup',
+  4: 'Confirm & Parse',
 }
 
 /**
@@ -52,6 +55,14 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
   const [parseStatus, setParseStatus] = useState<ParseStatus>('idle')
   const [parseProgress, setParseProgress] = useState(0)
   const [parseMessage, setParseMessage] = useState('')
+  const [activeProviderId, setActiveProviderId] = useState<ActiveProviderId>('gemini')
+  const [providerConfigs, setProviderConfigs] = useState<Record<ActiveProviderId, AIProviderConfig>>({
+    gemini: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+    openai_compatible: { apiKey: '', baseURL: 'https://api.openai.com/v1', modelId: '', customHeaders: {} },
+    claude: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+  })
+  const [isTestingApi, setIsTestingApi] = useState(false)
+  const [runPreflightAfterSetup, setRunPreflightAfterSetup] = useState(true)
 
   // Unpacker state
   const [unpackStatus, setUnpackStatus] = useState<UnpackStatus>('idle')
@@ -87,6 +98,13 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
     setGameFolderPath('')
     setSourceLanguage('')
     setTargetLanguage('vietnamese')
+    setActiveProviderId('gemini')
+    setProviderConfigs({
+      gemini: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+      openai_compatible: { apiKey: '', baseURL: 'https://api.openai.com/v1', modelId: '', customHeaders: {} },
+      claude: { apiKey: '', baseURL: '', modelId: '', customHeaders: {} },
+    })
+    setRunPreflightAfterSetup(true)
     setParseStatus('idle')
     setParseProgress(0)
     setUnpackStatus('idle')
@@ -146,7 +164,7 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
       }
     } catch (err: unknown) {
       setUnpackStatus('error')
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       setUnpackMessage(message)
     }
   }
@@ -162,7 +180,7 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
       setAvailableLanguages(languages)
       setCurrentStep(2)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       notify.error('Lỗi quét ngôn ngữ', message || 'Lỗi quét ngôn ngữ')
     }
   }
@@ -173,6 +191,12 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
     setParseMessage('Đang quét và nạp dữ liệu vào Database, vui lòng đợi (có thể mất 1-2 phút)...')
 
     try {
+      await window.api.settings.save({
+        providers: providerConfigs,
+        activeProviderId,
+        onboardingCompleted: true,
+      })
+
       await window.api.project.setup({
         gameFolderPath,
         sourceLanguage,
@@ -184,20 +208,47 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
       setParseStatus('success')
 
       setTimeout(() => {
-        onComplete({ gameFolderPath, sourceLanguage, targetLanguage })
+        onComplete({ gameFolderPath, sourceLanguage, targetLanguage, runPreflightAfterSetup })
         onOpenChange(false)
         resetWizard()
       }, 1000)
     } catch (err: unknown) {
       setParseStatus('error')
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       setParseMessage(message || 'Lỗi khi parse dữ liệu.')
     }
   }
 
   const canProceedStep1 = gameFolderPath.trim().length > 0
   const canProceedStep2 = sourceLanguage.length > 0
-  const canProceedStep3 = targetLanguage.trim().length > 0
+  const canProceedStep3 = targetLanguage.trim().length > 0 && (providerConfigs[activeProviderId]?.apiKey || '').trim().length > 0
+  const canProceedStep4 = targetLanguage.trim().length > 0
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void window.api.settings.get().then((settings) => {
+      if (cancelled) return
+      setActiveProviderId(settings.activeProviderId || 'gemini')
+      setProviderConfigs(settings.providers)
+    }).catch(() => void 0)
+    return () => { cancelled = true }
+  }, [open])
+
+  const handleTestApi = async (): Promise<void> => {
+    setIsTestingApi(true)
+    try {
+      await window.api.settings.save({
+        providers: providerConfigs,
+        activeProviderId,
+      })
+      const result = await window.api.settings.testConnection()
+      if (result.ok) notify.success('API OK', 'Kết nối provider thành công.')
+      else notify.error('API lỗi', result.error || 'Không thể kết nối provider.')
+    } finally {
+      setIsTestingApi(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) resetWizard(); onOpenChange(o) }}>
@@ -207,7 +258,7 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
 
           {/* Step Indicator */}
           <div className="flex items-center gap-2 mt-3">
-            {([1, 2, 3] as WizardStep[]).map((step, idx) => (
+            {([1, 2, 3, 4] as WizardStep[]).map((step, idx) => (
               <div key={step} className="flex items-center gap-2">
                 <div className={cn(
                   'flex items-center justify-center size-6 rounded-full text-[11px] font-bold transition-colors',
@@ -225,7 +276,7 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
                 )}>
                   {STEP_LABELS[step]}
                 </span>
-                {idx < 2 && <ChevronRight className="size-3.5 text-border flex-shrink-0" />}
+                {idx < 3 && <ChevronRight className="size-3.5 text-border flex-shrink-0" />}
               </div>
             ))}
           </div>
@@ -378,8 +429,69 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
             </div>
           )}
 
-          {/* Step 3: Confirm & Parse */}
+          {/* Step 3: AI Setup */}
           {currentStep === 3 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="select-provider-wizard">AI Provider</Label>
+                <Select value={activeProviderId} onValueChange={(v) => setActiveProviderId(v as ActiveProviderId)}>
+                  <SelectTrigger id="select-provider-wizard">
+                    <SelectValue placeholder="Chọn provider..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gemini">Gemini</SelectItem>
+                    <SelectItem value="openai_compatible">OpenAI Compatible</SelectItem>
+                    <SelectItem value="claude">Claude</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="input-api-key-wizard">API Key</Label>
+                <Input
+                  id="input-api-key-wizard"
+                  type="password"
+                  value={providerConfigs[activeProviderId]?.apiKey || ''}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setProviderConfigs((prev) => ({
+                      ...prev,
+                      [activeProviderId]: { ...prev[activeProviderId], apiKey: value },
+                    }))
+                  }}
+                  placeholder="Nhập API key"
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Bạn có thể chỉnh model/baseURL chi tiết sau trong Settings.
+                </p>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Mở Pre-flight sau khi tạo project</p>
+                  <p className="text-xs text-muted-foreground">Khuyến nghị bật để kiểm tra token/cost ngay.</p>
+                </div>
+                <Button
+                  variant={runPreflightAfterSetup ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setRunPreflightAfterSetup((v) => !v)}
+                >
+                  {runPreflightAfterSetup ? 'Bật' : 'Tắt'}
+                </Button>
+              </div>
+              <Button
+                id="btn-test-api-wizard"
+                variant="outline"
+                size="sm"
+                onClick={handleTestApi}
+                disabled={isTestingApi || !(providerConfigs[activeProviderId]?.apiKey || '').trim()}
+              >
+                {isTestingApi ? (<><Loader2 className="size-3.5 mr-1.5 animate-spin" />Testing...</>) : 'Test API Connection'}
+              </Button>
+            </div>
+          )}
+
+          {/* Step 4: Confirm & Parse */}
+          {currentStep === 4 && (
             <div className="space-y-4">
               {parseStatus === 'idle' && (
                 <div className="p-4 rounded-lg border border-border bg-muted/30 space-y-2 text-sm">
@@ -394,6 +506,10 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Target Language</span>
                     <span className="font-medium text-foreground">{targetLanguage}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Provider</span>
+                    <span className="font-medium text-foreground">{activeProviderId}</span>
                   </div>
                 </div>
               )}
@@ -442,16 +558,18 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
             Cancel
           </Button>
 
-          {currentStep < 3 ? (
+          {currentStep < 4 ? (
             <Button
               id="btn-wizard-next"
               onClick={() => {
                 if (currentStep === 1) handleScanLanguages()
-                else setCurrentStep(3)
+                else if (currentStep === 2) setCurrentStep(3)
+                else setCurrentStep(4)
               }}
               disabled={
                 (currentStep === 1 && !canProceedStep1) ||
-                (currentStep === 2 && !canProceedStep2)
+                (currentStep === 2 && !canProceedStep2) ||
+                (currentStep === 3 && !canProceedStep3)
               }
             >
               Next <ChevronRight className="size-3.5 ml-1" />
@@ -460,7 +578,7 @@ export function SetupWizardModal({ open, onOpenChange, onComplete }: SetupWizard
             <Button
               id="btn-wizard-start-parse"
               onClick={handleStartParse}
-              disabled={!canProceedStep3 || parseStatus !== 'idle'}
+              disabled={!canProceedStep4 || parseStatus !== 'idle'}
             >
               {parseStatus === 'parsing' ? (
                 <><Loader2 className="size-3.5 mr-1.5 animate-spin" />Parsing...</>

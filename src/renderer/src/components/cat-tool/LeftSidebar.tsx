@@ -16,6 +16,7 @@ import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { getLanguageLabel } from '../../../../shared/types'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 import type { RecentProject } from '../../../../shared/types'
 
 export type FileStatus = 'completed' | 'in_progress' | 'pending' | 'warning'
@@ -72,6 +73,7 @@ export function LeftSidebar({
   recentProjects,
   onOpenProject,
 }: LeftSidebarProps) {
+  const { t } = useI18n()
   const [searchQuery, setSearchQuery] = useState('')
   const [isExpanded, setIsExpanded] = useState(true)
   const [selectedRecent, setSelectedRecent] = useState('')
@@ -102,7 +104,7 @@ export function LeftSidebar({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
             id="input-file-search"
-            placeholder="Filter files..."
+            placeholder={t('leftSidebar.filterFiles')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8 h-7 text-xs bg-sidebar-accent/50"
@@ -136,7 +138,7 @@ export function LeftSidebar({
               onClick={onNewProject}
             >
               <Plus className="size-3" />
-              New
+              {t('leftSidebar.new')}
             </Button>
             <Button
               id="btn-project-change-location"
@@ -146,7 +148,7 @@ export function LeftSidebar({
               onClick={onChangeLocation}
             >
               <FolderOpen className="size-3" />
-              Change
+              {t('leftSidebar.change')}
             </Button>
             <Select value={selectedRecent} onValueChange={handleRecentSelect}>
               <SelectTrigger
@@ -155,7 +157,7 @@ export function LeftSidebar({
                 disabled={recentProjects.length === 0}
               >
                 <Clock className="size-3" />
-                <SelectValue placeholder="Recent" />
+                <SelectValue placeholder={t('leftSidebar.recent')} />
               </SelectTrigger>
               <SelectContent>
                 {recentProjects.map((project) => (
@@ -172,7 +174,7 @@ export function LeftSidebar({
             <div className="ml-4 mt-1 space-y-0.5">
               {filteredFiles.length === 0 && (
                 <p className="text-xs text-muted-foreground px-2 py-2 italic">
-                  {files.length === 0 ? 'Chưa có project. Tạo mới!' : 'Không tìm thấy file.'}
+                  {files.length === 0 ? t('leftSidebar.noProject') : t('leftSidebar.noFileFound')}
                 </p>
               )}
               {filteredFiles.map((file) => {
@@ -196,7 +198,7 @@ export function LeftSidebar({
                     </div>
                     <div className="ml-5.5 mt-1">
                       <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
-                        <span>{file.total_blocks} blocks</span>
+                        <span>{file.total_blocks} {t('leftSidebar.blocks')}</span>
                         <span>{progress}%</span>
                       </div>
                       <Progress
@@ -215,8 +217,8 @@ export function LeftSidebar({
       {/* Sidebar Footer Stats */}
       <div className="p-3 border-t border-sidebar-border text-[10px] text-muted-foreground">
         <div className="flex justify-between">
-          <span>{files.length} files</span>
-          <span>{overallProgress}% complete</span>
+          <span>{files.length} {t('leftSidebar.files')}</span>
+          <span>{overallProgress}% {t('leftSidebar.complete')}</span>
         </div>
       </div>
     </aside>

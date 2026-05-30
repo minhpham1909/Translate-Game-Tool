@@ -200,6 +200,12 @@ export interface AppSettings {
   // =========================================
   exportMode: 'vortex_like' | 'legacy_overwrite';
   forceTargetLanguageOnLaunch: boolean;
+
+  // =========================================
+  // Group 13: Onboarding & Tutorial (Phase 6 M4)
+  // =========================================
+  onboardingCompleted: boolean;
+  tutorialCompleted: boolean;
 }
 
 /**

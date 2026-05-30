@@ -66,6 +66,16 @@ export interface SearchMatch {
   field: 'original' | 'translated'
 }
 
+export interface QAIssue {
+  id: number
+  fileId: number
+  fileName: string
+  lineIndex: number
+  blockHash: string
+  severity: 'warning' | 'error'
+  description: string
+}
+
 export type SystemLogType = 'info' | 'warning' | 'error' | 'success'
 
 export interface SystemLogEntry {
@@ -194,6 +204,9 @@ declare global {
       search: {
         searchBlocks: (query: string, options: SearchOptions) => Promise<SearchMatch[]>
         replaceBlockText: (blockId: number, newText: string, isOriginal: boolean) => Promise<void>
+      }
+      qa: {
+        getIssues: (fileId?: number) => Promise<QAIssue[]>
       }
       workspace: {
         getFiles: () => Promise<WorkspaceFile[]>

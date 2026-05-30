@@ -8,6 +8,7 @@ import { Terminal, ChevronUp, ChevronDown, Circle, Pause, Play, Square } from 'l
 import { Button } from '@renderer/components/ui/button'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 
 export type LogType = 'info' | 'warning' | 'error' | 'success'
 
@@ -65,6 +66,7 @@ export function BottomBar({
   onQueueResume,
   onQueueStop,
 }: BottomBarProps) {
+  const { t } = useI18n()
   const [isTerminalOpen, setIsTerminalOpen] = useState(false)
   const progress = totalBlocks > 0 ? Math.round((translatedBlocks / totalBlocks) * 100) : 0
   const canPause = queueState === 'running'
@@ -84,14 +86,14 @@ export function BottomBar({
         <div className="h-full bg-terminal-bg border-b border-border">
           <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-card/30">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              System Console
+              {t('bottomBar.systemConsole')}
             </span>
-            <span className="text-[10px] text-muted-foreground">{logs.length} entries</span>
+            <span className="text-[10px] text-muted-foreground">{logs.length} {t('bottomBar.entries')}</span>
           </div>
           <ScrollArea className="h-[calc(100%-28px)]">
             <div className="p-2 font-mono text-[11px] space-y-0.5">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Chưa có log nào...</span>
+                <span className="text-muted-foreground italic">{t('bottomBar.noLog')}</span>
               ) : (
                 logs.map((log, i) => (
                   <div key={i} className="flex gap-2">
@@ -118,45 +120,45 @@ export function BottomBar({
               )}
             />
             <span className="text-muted-foreground">
-              {isConnected ? 'Connected' : 'Disconnected'}
+              {isConnected ? t('bottomBar.connected') : t('bottomBar.disconnected')}
             </span>
           </div>
 
           <div className="h-3 w-px bg-border" />
 
           <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">Total:</span>
+            <span className="text-muted-foreground">{t('bottomBar.total')}:</span>
             <span className="font-medium text-foreground">
               {translatedBlocks.toLocaleString()} / {totalBlocks.toLocaleString()}
             </span>
-            <span className="text-muted-foreground">blocks ({progress}%)</span>
+            <span className="text-muted-foreground">{t('bottomBar.blocks')} ({progress}%)</span>
           </div>
         </div>
 
         {/* Right Side */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">API Cost:</span>
+            <span className="text-muted-foreground">{t('bottomBar.apiCost')}:</span>
             <span className="font-medium text-warning">${apiCost.toFixed(4)}</span>
           </div>
 
           <div className="h-3 w-px bg-border" />
 
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Queue:</span>
+            <span className="text-muted-foreground">{t('bottomBar.queue')}:</span>
             <span className="font-medium text-foreground">{queueState.toUpperCase()}</span>
-            <span className="text-muted-foreground">ETA {etaLabel}</span>
+            <span className="text-muted-foreground">{t('bottomBar.eta')} {etaLabel}</span>
             {typeof queueSpeedBlocksPerMin === 'number' && (
               <span className="text-muted-foreground">{queueSpeedBlocksPerMin.toFixed(1)} blk/min</span>
             )}
             {typeof queueProcessed === 'number' && (
-              <span className="text-muted-foreground">done {queueProcessed}</span>
+              <span className="text-muted-foreground">{t('bottomBar.done')} {queueProcessed}</span>
             )}
             {typeof queueApproxInputTokens === 'number' && (
-              <span className="text-muted-foreground">inTok {queueApproxInputTokens}</span>
+              <span className="text-muted-foreground">{t('bottomBar.inTok')} {queueApproxInputTokens}</span>
             )}
             {typeof queueApproxOutputTokens === 'number' && (
-              <span className="text-muted-foreground">outTok {queueApproxOutputTokens}</span>
+              <span className="text-muted-foreground">{t('bottomBar.outTok')} {queueApproxOutputTokens}</span>
             )}
           </div>
 
@@ -203,7 +205,7 @@ export function BottomBar({
             onClick={() => setIsTerminalOpen(!isTerminalOpen)}
           >
             <Terminal className="size-3" />
-            Console
+            {t('bottomBar.console')}
             {isTerminalOpen
               ? <ChevronDown className="size-3" />
               : <ChevronUp className="size-3" />

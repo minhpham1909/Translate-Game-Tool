@@ -8,6 +8,7 @@ import { type ReactElement } from 'react'
 import { FolderOpen, Plus, Clock, AlertTriangle, BookOpen, Trash2 } from 'lucide-react'
 import { getLanguageLabel } from '../../../../shared/types'
 import { useNotification } from '../../context/NotificationContext'
+import { useI18n } from '@renderer/i18n'
 
 interface RecentProject {
   gameFolderPath: string
@@ -34,6 +35,7 @@ interface WelcomeScreenProps {
  */
 export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, onOpenProject, onDeleteProject }: WelcomeScreenProps): ReactElement {
   const notify = useNotification()
+  const { t } = useI18n()
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -43,11 +45,11 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
         <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-warning/10 border-b border-warning/30">
           <AlertTriangle className="size-4 text-warning flex-shrink-0" />
           <span className="text-sm text-warning">
-            API Key chưa được cài đặt. Vào{' '}
+            {t('welcome.apiKeyMissingBefore')}{' '}
             <button className="underline underline-offset-2 font-medium hover:text-warning/80 transition-colors">
-              Settings
+              {t('common.settings')}
             </button>
-            {' '}để cấu hình trước khi dịch.
+            {' '}{t('welcome.apiKeyMissingAfter')}
           </span>
         </div>
       )}
@@ -63,7 +65,7 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
           <div>
             <h1 className="text-2xl font-semibold text-foreground tracking-tight">VN Translator</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Computer-Assisted Translation Tool cho Visual Novel
+              {t('welcome.subtitle')}
             </p>
           </div>
         </div>
@@ -79,9 +81,9 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
               <Plus className="size-5 text-primary" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-foreground">Tạo Project Mới</p>
+              <p className="text-sm font-medium text-foreground">{t('welcome.createNewProject')}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Chọn thư mục game và ngôn ngữ
+                {t('welcome.createNewProjectDesc')}
               </p>
             </div>
           </button>
@@ -95,9 +97,9 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
               <FolderOpen className="size-5 text-muted-foreground group-hover:text-foreground transition-colors" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-foreground">Mở Project</p>
+              <p className="text-sm font-medium text-foreground">{t('welcome.openProject')}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Tiếp tục từ thư mục đã có
+                {t('welcome.openProjectDesc')}
               </p>
             </div>
           </button>
@@ -108,13 +110,13 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
           <div className="flex items-center gap-2 mb-3">
             <Clock className="size-3.5 text-muted-foreground" />
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Recent Projects ({recentProjects.length})
+               {t('welcome.recentProjects', { count: recentProjects.length })}
             </span>
           </div>
 
            {recentProjects.length === 0 ? (
              <div className="flex items-center justify-center h-24 rounded-lg border border-dashed border-border">
-               <p className="text-xs text-muted-foreground italic">Chưa có project nào gần đây</p>
+               <p className="text-xs text-muted-foreground italic">{t('welcome.noRecentProject')}</p>
              </div>
            ) : (
              <div className="space-y-2 max-h-64 overflow-auto pr-1">
@@ -144,23 +146,23 @@ export function WelcomeScreen({ recentProjects = [], hasApiKey, onNewProject, on
                      onClick={async (e) => {
                        e.stopPropagation()
                        const confirmed = await notify.confirm({
-                         title: 'Xóa Project',
-                         message: 'Xóa project này khỏi danh sách recent?',
-                         confirmText: 'Xóa',
-                         cancelText: 'Hủy'
-                       })
-                       if (confirmed) {
-                         const deleteFiles = await notify.confirm({
-                           title: 'Xóa file dịch?',
-                           message: 'Xóa cả file dịch trong thư mục game?\n(Chọn Hủy nếu chỉ muốn xóa khỏi danh sách)',
-                           confirmText: 'Xóa luôn file',
-                           cancelText: 'Chỉ xóa project'
-                         })
-                         onDeleteProject?.(project.gameFolderPath, deleteFiles)
-                       }
+                          title: t('welcome.deleteProjectTitle'),
+                          message: t('welcome.deleteProjectMsg'),
+                          confirmText: t('welcome.delete'),
+                          cancelText: t('common.cancel')
+                        })
+                        if (confirmed) {
+                          const deleteFiles = await notify.confirm({
+                            title: t('welcome.removeTranslatedFiles'),
+                            message: t('welcome.removeTranslatedFilesMsg'),
+                            confirmText: t('welcome.deleteWithFiles'),
+                            cancelText: t('welcome.deleteOnlyProject')
+                          })
+                          onDeleteProject?.(project.gameFolderPath, deleteFiles)
+                        }
                      }}
                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
-                     title="Xóa project"
+                      title={t('welcome.deleteProject')}
                    >
                      <Trash2 className="size-3.5" />
                    </button>

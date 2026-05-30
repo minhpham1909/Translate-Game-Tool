@@ -18,6 +18,7 @@ import { Label } from '@renderer/components/ui/label'
 import { Progress } from '@renderer/components/ui/progress'
 import { cn } from '@renderer/lib/utils'
 import { useNotification } from '@renderer/context/NotificationContext'
+import { getErrorMessage } from '@renderer/lib/errorHandling'
 
 type WizardStep = 1 | 2 | 3 | 4
 type ApplyStatus = 'idle' | 'applying' | 'success' | 'error'
@@ -98,7 +99,7 @@ export function UpdateGameModal({
       setPreview(result)
       setCurrentStep(3)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       notify.error('Failed to preview changes', message || 'Unable to preview update diff.')
     }
   }
@@ -129,7 +130,7 @@ export function UpdateGameModal({
       }, 2000)
     } catch (err: unknown) {
       setApplyStatus('error')
-      const message = err instanceof Error ? err.message : String(err)
+      const message = getErrorMessage(err)
       setApplyMessage(message || 'Update failed')
     }
   }
